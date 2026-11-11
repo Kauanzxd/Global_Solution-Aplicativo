@@ -1,8 +1,9 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View } from 'react-native';
-import Cabecalho from './src/componentes/Cabecalho';
+import Cabecalho from '../componentes/Cabecalho';
 
-export default function App() {
+// Tela inicial. O nome "index" faz dela a primeira tela que abre (rota "/").
+export default function Inicio() {
   return (
     <View style={styles.container}>
       <Cabecalho titulo="AeroCuidado" subtitulo="Drones que levam saúde a quem precisa" />
