@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
-import Svg, { Circle, Polygon, Polyline, Rect } from 'react-native-svg';
-import { AREAS, CRATERA, REPRESAS, TAMANHO_KM, VIAS } from '../dados/regiao';
+import Svg, { Circle, G, Polygon, Polyline, Rect, Text } from 'react-native-svg';
+import { AREAS, CRATERA, LOCAIS, REPRESAS, TAMANHO_KM, VIAS } from '../dados/regiao';
 
 // O desenho usa um "papel" de 100 x 100 unidades (o viewBox).
 // Como o mapa tem 10 km, cada unidade vale 100 metros: multiplicamos km por 10.
@@ -24,9 +24,42 @@ const ESTILO_VIA = {
   rodoanel: { borda: '#C9952A', miolo: '#F2C14E', largura: 1.6 },
 };
 
+// Aparência de cada tipo de local: cor do círculo e a letra dentro dele
+const ESTILO_LOCAL = {
+  hub: { cor: '#0B5CAD', letra: 'A' },
+  hospital: { cor: '#D32F2F', letra: 'H' },
+  ubs: { cor: '#2E7D32', letra: 'U' },
+  comunidade: { cor: '#8E5AB5', letra: 'C' },
+};
+
 // Transforma [[x, y], [x, y], ...] em km no texto "x,y x,y ..." que o SVG entende
 function paraPontosSvg(pontos) {
   return pontos.map(([x, y]) => `${x * ESCALA},${y * ESCALA}`).join(' ');
+}
+
+// Um local no mapa: círculo colorido com uma letra + o nome embaixo.
+// É um componente pequeno que só existe dentro do desenho do mapa.
+function Local({ local }) {
+  const estilo = ESTILO_LOCAL[local.tipo];
+  const x = local.x * ESCALA;
+  const y = local.y * ESCALA;
+
+  return (
+    <G>
+      <Circle cx={x} cy={y} r="2.2" fill={estilo.cor} stroke="#FFFFFF" strokeWidth="0.5" />
+      <Text x={x} y={y + 1} fontSize="2.8" fontWeight="bold" fill="#FFFFFF" textAnchor="middle">
+        {estilo.letra}
+      </Text>
+
+      {/* Nome: primeiro um contorno branco grosso, depois o texto escuro por cima (mesmo truque das vias) */}
+      <Text x={x} y={y + 5} fontSize="2.4" fontWeight="bold" textAnchor="middle" stroke="#FFFFFF" strokeWidth="0.8" fill="#FFFFFF">
+        {local.rotulo}
+      </Text>
+      <Text x={x} y={y + 5} fontSize="2.4" fontWeight="bold" textAnchor="middle" fill="#2B3440">
+        {local.rotulo}
+      </Text>
+    </G>
+  );
 }
 
 export default function Mapa() {
@@ -95,6 +128,11 @@ export default function Mapa() {
             stroke={ESTILO_VIA[via.tipo].miolo}
             strokeWidth={ESTILO_VIA[via.tipo].largura}
           />
+        ))}
+
+        {/* 7. Locais: por último, para ficarem por cima de tudo */}
+        {LOCAIS.map((local) => (
+          <Local key={local.id} local={local} />
         ))}
       </Svg>
     </View>
