@@ -50,3 +50,14 @@ export const LOCAIS = [
   { id: 'ubs-colonia', nome: 'UBS Vargem Grande (Colônia)', rotulo: 'UBS Colônia', tipo: 'ubs', x: 5.4, y: 7.4 },
   { id: 'borore', nome: 'Ilha do Bororé', rotulo: 'Ilha do Bororé', tipo: 'comunidade', x: 9.0, y: 2.4 },
 ];
+
+// Zonas de pouso seguro: campos abertos, longe de casas e fora da água.
+// Se o drone tiver uma pane, ele desvia para a zona mais próxima.
+export const ZONAS_POUSO = [
+  { id: 'ZP-01', x: 1.5, y: 4.9 },
+  { id: 'ZP-02', x: 2.6, y: 2.4 },
+  { id: 'ZP-03', x: 7.4, y: 2.2 },
+  { id: 'ZP-04', x: 8.0, y: 5.8 },
+  { id: 'ZP-05', x: 6.4, y: 6.4 },
+  { id: 'ZP-06', x: 6.6, y: 9.0 },
+];

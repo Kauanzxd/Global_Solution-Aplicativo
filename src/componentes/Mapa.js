@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 import Svg, { Circle, G, Polygon, Polyline, Rect, Text } from 'react-native-svg';
-import { AREAS, CRATERA, LOCAIS, REPRESAS, TAMANHO_KM, VIAS } from '../dados/regiao';
+import { AREAS, CRATERA, LOCAIS, REPRESAS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
 
 // O desenho usa um "papel" de 100 x 100 unidades (o viewBox).
 // Como o mapa tem 10 km, cada unidade vale 100 metros: multiplicamos km por 10.
@@ -37,6 +37,22 @@ function paraPontosSvg(pontos) {
   return pontos.map(([x, y]) => `${x * ESCALA},${y * ESCALA}`).join(' ');
 }
 
+// Texto legível em cima de qualquer fundo: primeiro um contorno branco grosso,
+// depois o texto escuro por cima (mesmo truque das vias).
+// Usado pelos locais e pelas zonas de pouso.
+function Rotulo({ x, y, texto, tamanho }) {
+  return (
+    <G>
+      <Text x={x} y={y} fontSize={tamanho} fontWeight="bold" textAnchor="middle" stroke="#FFFFFF" strokeWidth="0.8" fill="#FFFFFF">
+        {texto}
+      </Text>
+      <Text x={x} y={y} fontSize={tamanho} fontWeight="bold" textAnchor="middle" fill="#2B3440">
+        {texto}
+      </Text>
+    </G>
+  );
+}
+
 // Um local no mapa: círculo colorido com uma letra + o nome embaixo.
 // É um componente pequeno que só existe dentro do desenho do mapa.
 function Local({ local }) {
@@ -50,14 +66,34 @@ function Local({ local }) {
       <Text x={x} y={y + 1} fontSize="2.8" fontWeight="bold" fill="#FFFFFF" textAnchor="middle">
         {estilo.letra}
       </Text>
+      <Rotulo x={x} y={y + 5} texto={local.rotulo} tamanho="2.4" />
+    </G>
+  );
+}
 
-      {/* Nome: primeiro um contorno branco grosso, depois o texto escuro por cima (mesmo truque das vias) */}
-      <Text x={x} y={y + 5} fontSize="2.4" fontWeight="bold" textAnchor="middle" stroke="#FFFFFF" strokeWidth="0.8" fill="#FFFFFF">
-        {local.rotulo}
+// Uma zona de pouso: quadrado laranja com a letra "P" + o código embaixo.
+// O quadrado diferencia das bolinhas dos locais.
+function ZonaPouso({ zona }) {
+  const x = zona.x * ESCALA;
+  const y = zona.y * ESCALA;
+  const lado = 3.6;
+
+  return (
+    <G>
+      <Rect
+        x={x - lado / 2}
+        y={y - lado / 2}
+        width={lado}
+        height={lado}
+        rx="0.6"
+        fill="#FFFFFF"
+        stroke="#E08A00"
+        strokeWidth="0.6"
+      />
+      <Text x={x} y={y + 1} fontSize="2.6" fontWeight="bold" fill="#E08A00" textAnchor="middle">
+        P
       </Text>
-      <Text x={x} y={y + 5} fontSize="2.4" fontWeight="bold" textAnchor="middle" fill="#2B3440">
-        {local.rotulo}
-      </Text>
+      <Rotulo x={x} y={y + 4.6} texto={zona.id} tamanho="1.8" />
     </G>
   );
 }
@@ -130,7 +166,12 @@ export default function Mapa() {
           />
         ))}
 
-        {/* 7. Locais: por último, para ficarem por cima de tudo */}
+        {/* 7. Zonas de pouso */}
+        {ZONAS_POUSO.map((zona) => (
+          <ZonaPouso key={zona.id} zona={zona} />
+        ))}
+
+        {/* 8. Locais: por último, para ficarem por cima de tudo */}
         {LOCAIS.map((local) => (
           <Local key={local.id} local={local} />
         ))}
