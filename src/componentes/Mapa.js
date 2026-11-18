@@ -1,5 +1,5 @@
 import { StyleSheet, View } from 'react-native';
-import Svg, { Circle, G, Polygon, Polyline, Rect, Text } from 'react-native-svg';
+import Svg, { Circle, G, Line, Polygon, Polyline, Rect, Text } from 'react-native-svg';
 import { AREAS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
 
 // O desenho usa um "papel" de 100 x 100 unidades (o viewBox).
@@ -99,7 +99,28 @@ function ZonaPouso({ zona }) {
   );
 }
 
-export default function Mapa() {
+// O drone visto de cima: dois braços em "X" com uma hélice em cada ponta
+function Drone({ x, y }) {
+  const cx = x * ESCALA;
+  const cy = y * ESCALA;
+  const braco = 2.2;
+
+  return (
+    <G>
+      <Line x1={cx - braco} y1={cy - braco} x2={cx + braco} y2={cy + braco} stroke="#0B1F33" strokeWidth="0.6" />
+      <Line x1={cx - braco} y1={cy + braco} x2={cx + braco} y2={cy - braco} stroke="#0B1F33" strokeWidth="0.6" />
+      <Circle cx={cx - braco} cy={cy - braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
+      <Circle cx={cx + braco} cy={cy - braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
+      <Circle cx={cx - braco} cy={cy + braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
+      <Circle cx={cx + braco} cy={cy + braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
+      <Circle cx={cx} cy={cy} r="1.0" fill="#0B1F33" />
+    </G>
+  );
+}
+
+// "destino" é o local para onde o drone vai (um item de LOCAIS)
+export default function Mapa({ destino }) {
+  const hub = LOCAIS.find((local) => local.id === 'hub');
   const matas = AREAS.filter((area) => area.tipo === 'mata');
   const urbanas = AREAS.filter((area) => area.tipo === 'urbano');
 
@@ -186,10 +207,26 @@ export default function Mapa() {
           <ZonaPouso key={zona.id} zona={zona} />
         ))}
 
-        {/* 9. Locais: por último, para ficarem por cima de tudo */}
+        {/* 9. Rota: linha tracejada do hub até o destino (só se houver destino) */}
+        {destino && (
+          <Line
+            x1={hub.x * ESCALA}
+            y1={hub.y * ESCALA}
+            x2={destino.x * ESCALA}
+            y2={destino.y * ESCALA}
+            stroke="#0B5CAD"
+            strokeWidth="0.7"
+            strokeDasharray="2 1.5"
+          />
+        )}
+
+        {/* 10. Locais: por cima do mapa e da rota */}
         {LOCAIS.map((local) => (
           <Local key={local.id} local={local} />
         ))}
+
+        {/* 11. Drone: por último de tudo. Por enquanto, parado no hub */}
+        <Drone x={hub.x} y={hub.y} />
       </Svg>
     </View>
   );
