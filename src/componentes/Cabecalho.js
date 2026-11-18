@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 // Cabeçalho reutilizável: mostra um título e, se for passado, um subtítulo.
-// Uso: <Cabecalho titulo="AeroCuidado" subtitulo="Texto menor" />
+// Uso: <Cabecalho titulo="SADEC" subtitulo="Texto menor" />
 export default function Cabecalho({ titulo, subtitulo }) {
   return (
     <View style={styles.caixa}>

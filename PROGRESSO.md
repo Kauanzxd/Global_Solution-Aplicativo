@@ -1,4 +1,4 @@
-# PROGRESSO — AeroCuidado
+# PROGRESSO — SADEC
 
 Diário do projeto. Lido no início de toda sessão e atualizado ao final.
 
@@ -16,8 +16,14 @@ Diário do projeto. Lido no início de toda sessão e atualizado ao final.
 
 ## O projeto
 
-**AeroCuidado**: rede de drones autônomos de entrega em Parelheiros
-(zona sul de SP, entre as represas Guarapiranga e Billings).
+**SADEC — Sistema Autônomo de Drones de Entrega e Cuidado**
+(antes chamado AeroCuidado): rede de drones autônomos de entrega em Perus e
+Anhanguera (noroeste da capital de SP). A região foi escolhida por ter
+baixa densidade em boa parte do território e grandes áreas verdes para
+pouso de emergência (Parque Anhanguera, o maior parque municipal de SP,
+e o Parque Estadual do Jaraguá), além de nomes conhecidos (rodovias
+Anhanguera e Bandeirantes, Rodoanel, Pico do Jaraguá). Antes o mapa era
+de Parelheiros (zona sul).
 
 Modos por prioridade:
 1. Órgãos
@@ -52,12 +58,16 @@ Parte secundária: aba de Pedidos.
 - `src/app/_layout.js` (Stack) e `src/app/(tabs)/` com as abas Simular
   (`index.js`) e Pedidos (`pedidos.js`).
 - `src/componentes/Cabecalho.js`
-- `src/dados/regiao.js`: mapa esquemático de 10x10 km (x 0=oeste a
-  10=leste, y 0=norte a 10=sul) com REPRESAS, AREAS (mata/urbano),
-  CRATERA, VIAS, LOCAIS (hub, 2 hospitais, 2 UBSs, Ilha do Bororé) e
-  ZONAS_POUSO (ZP-01 a ZP-06).
+- `src/dados/regiao.js`: mapa esquemático de Perus/Anhanguera, 10x10 km
+  (x 0=oeste a 10=leste, y 0=norte a 10=sul) com RIOS (Ribeirão Perus),
+  AREAS (mata/urbano, com `rotulo` opcional), PICO (Pico do Jaraguá),
+  VIAS (tipos rodovia, rodoanel, estrada e ferrovia/CPTM), LOCAIS (hub,
+  Hosp. Perus, Hosp. Pirituba, UBS Perus, UBS Morro Doce, Aldeia
+  Jaraguá) e ZONAS_POUSO (ZP-01 a ZP-06). Nomes de hospitais são
+  genéricos ("de referência"), para não afirmar nomes reais incertos.
 - `src/componentes/Mapa.js`: desenha tudo em SVG (viewBox 100x100,
   ESCALA = 10), com os componentes internos Rotulo, Local e ZonaPouso.
+  A ferrovia usa miolo tracejado (`tracejado` no ESTILO_VIA).
 - `src/regras/distancia.js`: `distanciaKm` (Pitágoras) e
   `zonaMaisProxima(ponto, zonas)`.
 - `src/regras/bateria.js`: `CONSUMO_POR_KM = 5`,
@@ -106,3 +116,17 @@ Expo Go, na mesma rede Wi-Fi.
 - **Conceitos:** arquivos de continuidade entre sessões (diário do
   projeto + instruções automáticas para o Claude).
 - **Onde paramos:** pronto para começar o passo 1 dos próximos passos.
+
+### 18/11/2026 — Troca da região do mapa
+- **Feito:** comparamos Marsilac, Perus/Anhanguera e a borda da
+  Cantareira e escolhemos Perus/Anhanguera. O `regiao.js` foi reescrito
+  e o `Mapa.js` ajustado (rios no lugar das represas, Pico do Jaraguá
+  no lugar da cratera, rodovias, trem da CPTM e nomes das áreas). Desta
+  vez, a pedido, foi tudo de uma vez, não aos poucos. O projeto foi
+  renomeado de AeroCuidado para SADEC (app.json, hub no mapa com a
+  letra "S", README, CLAUDE.md e este arquivo).
+- **Conceitos:** reaproveitar o mesmo formato de dados para trocar o
+  conteúdo sem mexer na lógica; propriedades opcionais (`rotulo`,
+  `tracejado`); `strokeDasharray` no SVG.
+- **Onde paramos:** mapa novo pronto e testado (web + regras no Node).
+  Próximo é o passo 1: drone parado no mapa + linha da rota.

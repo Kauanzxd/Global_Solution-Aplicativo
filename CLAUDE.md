@@ -1,4 +1,4 @@
-# Instruções para o Claude — AeroCuidado
+# Instruções para o Claude — SADEC
 
 ## Início de toda sessão
 - Antes de qualquer coisa, leia o `PROGRESSO.md` (contexto, o que já

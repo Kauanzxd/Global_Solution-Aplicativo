@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 import Svg, { Circle, G, Polygon, Polyline, Rect, Text } from 'react-native-svg';
-import { AREAS, CRATERA, LOCAIS, REPRESAS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
+import { AREAS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
 
 // O desenho usa um "papel" de 100 x 100 unidades (o viewBox).
 // Como o mapa tem 10 km, cada unidade vale 100 metros: multiplicamos km por 10.
@@ -9,24 +9,25 @@ const ESCALA = 100 / TAMANHO_KM;
 // Cores de cada tipo de área e de via
 const CORES = {
   terra: '#E3EFD3',
-  agua: '#9CCBEA',
-  aguaBorda: '#6FA9D4',
+  agua: '#6FA9D4',
   mata: '#B5D8A6',
   urbano: '#E9DCC6',
   urbanoBorda: '#CDB894',
-  cratera: '#D5E8C4',
-  crateraBorda: '#9DBF86',
+  pico: '#7A6A55',
 };
 
-// Cada tipo de via é desenhado com duas linhas: uma larga (borda) e uma fina por cima (miolo)
+// Cada tipo de via é desenhado com duas linhas: uma larga (borda) e uma fina por cima (miolo).
+// "tracejado" (opcional) deixa o miolo em pedaços, como os dormentes de um trilho.
 const ESTILO_VIA = {
-  estrada: { borda: '#B9B2A3', miolo: '#FFFFFF', largura: 1.2 },
+  estrada: { borda: '#B9B2A3', miolo: '#FFFFFF', largura: 1.0 },
+  rodovia: { borda: '#C0632B', miolo: '#F4A259', largura: 1.6 },
   rodoanel: { borda: '#C9952A', miolo: '#F2C14E', largura: 1.6 },
+  ferrovia: { borda: '#555555', miolo: '#FFFFFF', largura: 0.6, tracejado: '1.5 1.5' },
 };
 
 // Aparência de cada tipo de local: cor do círculo e a letra dentro dele
 const ESTILO_LOCAL = {
-  hub: { cor: '#0B5CAD', letra: 'A' },
+  hub: { cor: '#0B5CAD', letra: 'S' },
   hospital: { cor: '#D32F2F', letra: 'H' },
   ubs: { cor: '#2E7D32', letra: 'U' },
   comunidade: { cor: '#8E5AB5', letra: 'C' },
@@ -113,27 +114,29 @@ export default function Mapa() {
           <Polygon key={area.nome} points={paraPontosSvg(area.pontos)} fill={CORES.mata} />
         ))}
 
-        {/* 3. Cratera de Colônia (borda tracejada) */}
-        <Circle
-          cx={CRATERA.x * ESCALA}
-          cy={CRATERA.y * ESCALA}
-          r={CRATERA.raio * ESCALA}
-          fill={CORES.cratera}
-          stroke={CORES.crateraBorda}
-          strokeWidth="0.6"
-          strokeDasharray="1.5 1"
-        />
-
-        {/* 4. Represas */}
-        {REPRESAS.map((represa) => (
-          <Polygon
-            key={represa.nome}
-            points={paraPontosSvg(represa.pontos)}
-            fill={CORES.agua}
-            stroke={CORES.aguaBorda}
-            strokeWidth="0.4"
+        {/* 3. Rios e córregos (linhas azuis finas) */}
+        {RIOS.map((rio) => (
+          <Polyline
+            key={rio.nome}
+            points={paraPontosSvg(rio.pontos)}
+            fill="none"
+            stroke={CORES.agua}
+            strokeWidth="0.8"
           />
         ))}
+
+        {/* 4. Pico do Jaraguá: um triângulo, o símbolo de montanha */}
+        <Polygon
+          points={paraPontosSvg([
+            [PICO.x, PICO.y - 0.35],
+            [PICO.x - 0.35, PICO.y + 0.25],
+            [PICO.x + 0.35, PICO.y + 0.25],
+          ])}
+          fill={CORES.pico}
+          stroke="#FFFFFF"
+          strokeWidth="0.4"
+        />
+        <Rotulo x={PICO.x * ESCALA} y={(PICO.y - 0.6) * ESCALA} texto={PICO.nome} tamanho="2.0" />
 
         {/* 5. Áreas urbanas */}
         {urbanas.map((area) => (
@@ -163,15 +166,27 @@ export default function Mapa() {
             fill="none"
             stroke={ESTILO_VIA[via.tipo].miolo}
             strokeWidth={ESTILO_VIA[via.tipo].largura}
+            strokeDasharray={ESTILO_VIA[via.tipo].tracejado}
           />
         ))}
 
-        {/* 7. Zonas de pouso */}
+        {/* 7. Nomes das áreas (só as que têm "rotulo") */}
+        {AREAS.filter((area) => area.rotulo).map((area) => (
+          <Rotulo
+            key={`rotulo-${area.nome}`}
+            x={area.rotulo.x * ESCALA}
+            y={area.rotulo.y * ESCALA}
+            texto={area.rotulo.texto}
+            tamanho="2.0"
+          />
+        ))}
+
+        {/* 8. Zonas de pouso */}
         {ZONAS_POUSO.map((zona) => (
           <ZonaPouso key={zona.id} zona={zona} />
         ))}
 
-        {/* 8. Locais: por último, para ficarem por cima de tudo */}
+        {/* 9. Locais: por último, para ficarem por cima de tudo */}
         {LOCAIS.map((local) => (
           <Local key={local.id} local={local} />
         ))}
