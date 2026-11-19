@@ -20,11 +20,10 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // { durante: 'gps' } no lugar do km = acontece 10 s depois da perda do sinal.
 // Temperatura: { tipo: 'temperatura', km: 1 } = alta; { ..., grau: 'critica' } = crítica.
 // Uma segunda temperatura alta, com o drone já quente, vira crítica.
+// Bateria: { tipo: 'bateria', km: 1, perda: 40 } = uma célula falha e a bateria cai 40 pontos
+// (sem "perda", cai 20). Teste com perda 20 (segue), 40 (zona) e 62 (paraquedas).
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [
-  { tipo: 'temperatura', km: 1 }, // alta: reduz a velocidade e mantém a entrega
-  { tipo: 'temperatura', km: 2.5 }, // piorou: vira crítica, pouso imediato
-];
+const EVENTOS = [{ tipo: 'bateria', km: 1, perda: 40 }];
 const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar

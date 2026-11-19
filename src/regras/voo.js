@@ -532,6 +532,46 @@ function temperaturaCritica(voo, local, regiao, motivo) {
   };
 }
 
+// ---------- Bateria ----------
+// Evento: { tipo: 'bateria', km: 2, perda: 30 } = uma célula falha e a bateria cai 30 pontos.
+// Sem "perda", cai 20. Depois da queda, o drone refaz as contas, do melhor para o pior caso:
+//   1. ainda cobre a entrega + zona + margem? Segue a entrega.
+//   2. cobre ir a uma zona com margem? Vai para a zona.
+//   3. nem isso? Resposta "não ou talvez": abre o paraquedas agora, enquanto está alto.
+const PERDA_BATERIA_PADRAO = 20;
+
+function falhaBateria(voo, local, altitude, regiao, motivo) {
+  const tem = voo.bateria;
+  const fator = voo.temperaturaAlta ? FATOR_KM_TEMPERATURA_ALTA : 1; // quente, gasta mais por km
+
+  // 1. Em voo normal: ainda dá para fazer a entrega?
+  if (voo.situacao === 'voando') {
+    const destino = voo.destinoFinal;
+    const zonaDepois = zonaMaisProxima(destino, regiao.zonas);
+    const precisa = bateriaParaEntregarEIrAZona(distanciaKm(local, destino), zonaDepois.distancia) * fator;
+    if (tem >= precisa) {
+      return { ...voo, mensagem: `${motivo} Ainda cobre a entrega (tem ${Math.round(tem)}%, precisa ${Math.round(precisa)}%)` };
+    }
+  }
+
+  // Esperando o GPS: a espera já confere a reserva a cada tique
+  if (voo.situacao === 'sem-gps' || voo.situacao === 'afastando') return { ...voo, mensagem: motivo };
+
+  // 2. Dá para chegar a uma zona com margem? (se já estava indo para uma, confere essa)
+  const jaIndoParaZona = voo.situacao === 'desviando' || voo.situacao === 'motor-fraco';
+  const alvo = jaIndoParaZona
+    ? { zona: voo.destino, distancia: distanciaKm(local, voo.destino) }
+    : zonaMaisProxima(local, regiao.zonas);
+
+  if (tem >= bateriaParaChegar(alvo.distancia) * fator) {
+    if (jaIndoParaZona) return { ...voo, mensagem: `${motivo} Ainda chega à ${alvo.zona.id} com margem` };
+    return desviarParaZona(voo, local, regiao, `${motivo} Não cobre mais a entrega.`);
+  }
+
+  // 3. Não chega com margem a lugar nenhum: paraquedas agora
+  return abrirParaquedas(voo, local, altitude, regiao, `${motivo} Sem bateria para chegar com segurança a uma zona.`);
+}
+
 // ---------- Eventos ----------
 
 // O que o drone faz quando um evento acontece. Recebe o drone no ponto exato do evento.
@@ -565,6 +605,13 @@ function aplicarEvento(voo, evento, regiao) {
 
     case 'falha-grave':
       return abrirParaquedas(voo, local, altitude, regiao, `Falha grave ${onde}!`);
+
+    case 'bateria': {
+      if (voo.situacao === 'planando') return null; // motores desligados: a bateria não importa mais
+      const perda = evento.perda ?? PERDA_BATERIA_PADRAO;
+      const comMenos = { ...voo, bateria: Math.max((voo.bateria ?? 100) - perda, 0) };
+      return falhaBateria(comMenos, local, altitude, regiao, `Falha numa célula da bateria ${onde}! Perdeu ${perda}%.`);
+    }
 
     case 'temperatura':
       if (voo.situacao === 'planando') return null; // motores desligados: já não esquentam
