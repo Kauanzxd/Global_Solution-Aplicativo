@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Cabecalho from '../../componentes/Cabecalho';
+import CenariosProntos from '../../componentes/CenariosProntos';
 import Contador from '../../componentes/Contador';
 import EditorEventos from '../../componentes/EditorEventos';
 import Mapa from '../../componentes/Mapa';
@@ -33,6 +34,17 @@ const CONFIGURACAO_INICIAL = {
   bateria: 80,
   eventos: [],
 };
+
+// Um cenário pronto → a configuração da tela (destino, missão, bateria e eventos).
+// Cada evento ganha um id próprio, igual aos adicionados à mão.
+function configuracaoDoCenario(cenario) {
+  return {
+    destino: LOCAIS.find((local) => local.id === cenario.destino),
+    prioridade: cenario.prioridade,
+    bateria: cenario.bateria,
+    eventos: cenario.eventos.map((evento, indice) => ({ id: `${cenario.id}-${indice}`, ...evento })),
+  };
+}
 
 // Os eventos montados na tela → o formato que o voo (voo.js) entende.
 // Eventos depois do fim da rota (ida + volta) ficam de fora.
@@ -117,8 +129,20 @@ export default function Simular() {
   const [voo, setVoo] = useState(null);
   const emVoo = voo !== null && estaNoAr(voo);
 
-  // Muda só um campo da configuração, mantendo os outros (o "..." copia o resto)
-  const mudar = (campo, valor) => setConfiguracao((atual) => ({ ...atual, [campo]: valor }));
+  // Qual cenário pronto está carregado (null = o usuário montou ou mexeu em algo)
+  const [cenario, setCenario] = useState(null);
+
+  // Muda só um campo da configuração, mantendo os outros (o "..." copia o resto).
+  // Mexeu em algo? Deixa de ser exatamente o cenário pronto.
+  const mudar = (campo, valor) => {
+    setConfiguracao((atual) => ({ ...atual, [campo]: valor }));
+    setCenario(null);
+  };
+
+  const carregarCenario = (escolhido) => {
+    setConfiguracao(configuracaoDoCenario(escolhido));
+    setCenario(escolhido.id);
+  };
 
   // Os pontos de entrega têm gente: numa emergência, o drone evita descer perto deles.
   // Se o destino for um ponto livre do mapa, ele também entra nessa lista.
@@ -204,6 +228,10 @@ export default function Simular() {
         // ---------- MONTANDO A SIMULAÇÃO ----------
         <View>
           <Text style={styles.dicaMapa}>Toque em qualquer ponto do mapa para escolher o destino</Text>
+
+          <Secao titulo="Cenários prontos" dica="Comece por um deles e ajuste o que quiser, ou monte do zero abaixo">
+            <CenariosProntos escolhido={cenario} aoEscolher={carregarCenario} />
+          </Secao>
 
           <Secao titulo="Destino" dica={`${distanciaKm(hub, configuracao.destino).toFixed(1).replace('.', ',')} km do hub (ida)`}>
             <Opcoes
