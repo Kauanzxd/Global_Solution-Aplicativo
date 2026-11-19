@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Cabecalho from '../../componentes/Cabecalho';
 import Contador from '../../componentes/Contador';
+import EditorEventos from '../../componentes/EditorEventos';
 import Mapa from '../../componentes/Mapa';
 import Opcoes from '../../componentes/Opcoes';
 import Secao from '../../componentes/Secao';
@@ -29,7 +30,21 @@ const CONFIGURACAO_INICIAL = {
   destino: LOCAIS.find((local) => local.id === 'aldeia-jaragua'),
   prioridade: 'saude',
   bateria: 80,
+  eventos: [],
 };
+
+// Os eventos montados na tela → o formato que o voo (voo.js) entende.
+// Eventos depois do fim da rota (ida + volta) ficam de fora.
+function eventosParaOVoo(eventos, distanciaIda) {
+  return eventos
+    .filter((evento) => evento.km <= distanciaIda * 2 + 0.001)
+    .map((evento) => {
+      const pronto = { ...evento };
+      // GPS "não volta" = sem duração (é assim que o voo entende)
+      if (pronto.tipo === 'gps' && pronto.duracao === 0) delete pronto.duracao;
+      return pronto;
+    });
+}
 
 // Zoom: com um obstáculo a até 1 km, o mapa aproxima para mostrar só 1,2 km em volta do drone (8x)
 const VISTA_NORMAL = 100;
@@ -83,7 +98,8 @@ export default function Simular() {
     vias: VIAS,
     locais: destinoLivre ? [...LOCAIS_DE_ENTREGA, configuracao.destino] : LOCAIS_DE_ENTREGA,
   };
-  const eventos = []; // a lista de eventos chega na próxima parte (4c)
+  const distanciaIda = distanciaKm(hub, configuracao.destino);
+  const eventos = eventosParaOVoo(configuracao.eventos, distanciaIda);
 
   // Enquanto o drone está no ar, um "relógio" avança o voo a cada PASSO_MS
   useEffect(() => {
@@ -187,6 +203,17 @@ export default function Simular() {
               />
               <View style={[styles.marcaPrecisa, { left: `${Math.min(precisa, 100)}%` }]} />
             </View>
+          </Secao>
+
+          <Secao
+            titulo={`Eventos (${configuracao.eventos.length})`}
+            dica={`Ida: km 0 a ${distanciaIda.toFixed(1).replace('.', ',')} · Volta: até o km ${(distanciaIda * 2).toFixed(1).replace('.', ',')}`}
+          >
+            <EditorEventos
+              eventos={configuracao.eventos}
+              distanciaIda={distanciaIda}
+              aoMudar={(lista) => mudar('eventos', lista)}
+            />
           </Secao>
 
           <Pressable
