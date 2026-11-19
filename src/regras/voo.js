@@ -14,6 +14,7 @@
 // Eventos acontecem no "km da viagem", contado pelo HODÔMETRO: a distância total
 // voada desde o hub, somando todos os trechos (como o odômetro de um carro).
 // Assim, uma segunda falha pode acontecer no meio de um desvio de emergência.
+import { CONSUMO_POR_KM, CONSUMO_POR_SEGUNDO } from './bateria.js';
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
 import {
   ALTITUDE_MINIMA_PARAQUEDAS,
@@ -41,6 +42,11 @@ const CHEGADA_SEGURA_M = 60; // só segue para a zona se a previsão for chegar 
 const TIQUES_TENTANDO_GPS = 60; // fica 60 tiques (3 s na tela) parado tentando recuperar o sinal
 const INCERTEZA_INICIAL_M = 10; // ao perder o GPS, a posição já pode estar errada em 10 m...
 const INCERTEZA_POR_TIQUE_M = 1.5; // ...e o erro cresce 1,5 m a cada tique sem GPS
+
+// Bateria: quantos segundos de verdade cada tique representa nas fases paradas.
+// (Andando, o tique é o tempo de voar o pedaço do caminho: 0,05 km a 15 m/s ≈ 3,3 s.)
+const SEGUNDOS_TIQUE_VERTICAL = 1; // subindo ou descendo 3 m por tique, a 3 m/s
+const SEGUNDOS_TIQUE_PAIRANDO = 5; // parado no ar, cada tique vale 5 s (para a espera não demorar na tela)
 
 const NO_AR = ['decolando', 'voando', 'desviando', 'motor-fraco', 'sem-gps', 'planando', 'descendo'];
 
@@ -91,7 +97,27 @@ function posicaoAtual(voo) {
 // O que continua valendo quando o drone começa um trecho novo:
 // o vento, o hodômetro, se ele está sem GPS e o tamanho do erro da posição
 function continuar(voo) {
-  return { vento: voo.vento, hodometro: voo.hodometro || 0, semGps: voo.semGps, incerteza: voo.incerteza };
+  return {
+    vento: voo.vento,
+    hodometro: voo.hodometro || 0,
+    semGps: voo.semGps,
+    incerteza: voo.incerteza,
+    bateria: voo.bateria,
+  };
+}
+
+// Quanto de bateria (%) o drone gasta neste tique
+function consumoDoTique(voo, passoKm) {
+  // De paraquedas, os motores estão desligados: não gasta nada
+  if (voo.situacao === 'planando' || (voo.situacao === 'descendo' && voo.paraquedasAberto)) return 0;
+
+  if (voo.situacao === 'decolando' || voo.situacao === 'descendo') {
+    return CONSUMO_POR_SEGUNDO * SEGUNDOS_TIQUE_VERTICAL;
+  }
+  if (voo.situacao === 'sem-gps') return CONSUMO_POR_SEGUNDO * SEGUNDOS_TIQUE_PAIRANDO;
+
+  // Andando (normal, desviando ou com motor fraco): o tempo de voar um pedaço do caminho
+  return CONSUMO_POR_KM * passoKm;
 }
 
 // Sem GPS, o drone estima onde está (bússola + sensores + câmera), e o erro
@@ -418,6 +444,17 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   // Sem GPS, a cada tique o erro da posição estimada cresce um pouco
   if (voo.semGps) {
     voo = { ...voo, incerteza: voo.incerteza + INCERTEZA_POR_TIQUE_M };
+  }
+
+  // A cada tique com os motores ligados, gasta bateria
+  if (voo.bateria !== undefined) {
+    voo = { ...voo, bateria: Math.max(voo.bateria - consumoDoTique(voo, passoKm), 0) };
+
+    // Acabou a bateria no ar: os motores param. É como uma falha grave.
+    const motoresLigados = consumoDoTique(voo, passoKm) > 0;
+    if (voo.bateria === 0 && motoresLigados) {
+      return abrirParaquedas(voo, posicaoAtual(voo), altitudeDoVoo(voo), regiao, 'Bateria esgotada!');
+    }
   }
 
   // Subindo ou descendo na vertical: o drone não sai do lugar

@@ -5,6 +5,11 @@ import { distanciaKm } from './distancia.js';
 // Com 5% por km, uma bateria cheia (100%) aguenta 20 km.
 export const CONSUMO_POR_KM = 5;
 
+// Em voo, o gasto depende do TEMPO com os motores ligados (pairar gasta quase o
+// mesmo que voar). Voando a 15 m/s (0,015 km/s), 5% por km vira 0,075% por segundo.
+export const VELOCIDADE_CRUZEIRO_KM_S = 0.015;
+export const CONSUMO_POR_SEGUNDO = CONSUMO_POR_KM * VELOCIDADE_CRUZEIRO_KM_S; // 0,075% por segundo
+
 // Margem de segurança: a bateria precisa ter 30% A MAIS do que a rota gasta.
 // 0.3 é o mesmo que 30%.
 export const MARGEM_SEGURANCA = 0.3;

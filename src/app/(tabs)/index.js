@@ -23,6 +23,7 @@ const EVENTOS = [
   { tipo: 'gps', km: 2, recupera: false },
   { tipo: 'falha-grave', km: 2.8 }, // no meio do desvio, ainda sem GPS
 ];
+const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
@@ -35,6 +36,7 @@ export default function Simular() {
     destino,
     km: 0,
     altitude: 0,
+    bateria: BATERIA_INICIAL,
     situacao: 'decolando',
     mensagem: 'Decolando...',
   });
@@ -74,6 +76,7 @@ export default function Simular() {
         />
       </View>
       <Text style={styles.status}>{voo.mensagem}</Text>
+      <Text style={styles.bateria}>Bateria: {Math.round(voo.bateria)}%</Text>
     </View>
   );
 }
@@ -93,5 +96,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     color: '#2B3440',
+  },
+  bateria: {
+    marginTop: 8,
+    fontSize: 14,
+    textAlign: 'center',
+    color: '#5A6573',
   },
 });
