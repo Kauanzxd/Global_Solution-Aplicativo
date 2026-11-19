@@ -27,7 +27,7 @@ import {
   DETECCAO_SENSOR_KM,
   TIPOS_OBSTACULO,
   criarObstaculo,
-  posicaoObstaculo,
+  medirObstaculo,
 } from './obstaculos.js';
 import { riscoNoPonto } from './risco.js';
 import {
@@ -614,12 +614,12 @@ function ameacaMaisUrgente(voo) {
   let maisUrgente = null;
 
   for (const obstaculo of voo.obstaculos || []) {
-    const agora = posicaoObstaculo(obstaculo, voo.tempo);
+    // 1. O sensor mede o ponto mais perigoso do obstáculo, agora e 1 segundo antes
+    const { agora, antes } = medirObstaculo(obstaculo, voo.tempo, local);
     const distancia = distanciaKm(local, agora);
     if (distancia > DETECCAO_SENSOR_KM) continue; // o sensor ainda não enxerga
 
-    // 1. Velocidade medida pelo sensor: quanto andou no último segundo
-    const antes = posicaoObstaculo(obstaculo, voo.tempo - 1);
+    // A velocidade é quanto esse ponto andou no último segundo
     const velocidadeObstaculo = { x: agora.x - antes.x, y: agora.y - antes.y };
 
     // 2. Ponto de maior aproximação, com posição e velocidade RELATIVAS

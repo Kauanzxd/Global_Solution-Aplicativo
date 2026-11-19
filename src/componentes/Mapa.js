@@ -211,6 +211,25 @@ function Obstaculo({ obstaculo, s }) {
   const x = obstaculo.posicao.x * ESCALA;
   const y = obstaculo.posicao.y * ESCALA;
 
+  // No guindaste, a área de segurança é uma faixa em volta do braço inteiro
+  if (obstaculo.tipo === 'guindaste') {
+    return (
+      <G>
+        <Line
+          x1={obstaculo.base.x * ESCALA}
+          y1={obstaculo.base.y * ESCALA}
+          x2={obstaculo.ponta.x * ESCALA}
+          y2={obstaculo.ponta.y * ESCALA}
+          stroke="#D32F2F"
+          strokeOpacity="0.15"
+          strokeWidth={obstaculo.bolhaKm * 2 * ESCALA}
+          strokeLinecap="round"
+        />
+        <Guindaste base={obstaculo.base} ponta={obstaculo.ponta} s={s} />
+      </G>
+    );
+  }
+
   return (
     <G>
       <Circle
@@ -224,7 +243,6 @@ function Obstaculo({ obstaculo, s }) {
         strokeDasharray={tracejado([0.8, 0.8], s)}
       />
 
-      {obstaculo.tipo === 'guindaste' && <Guindaste base={obstaculo.base} ponta={obstaculo.ponta} s={s} />}
 
       {obstaculo.tipo === 'passaros' && (
         <G>

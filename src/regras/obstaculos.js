@@ -67,10 +67,41 @@ export function posicaoObstaculo(obstaculo, tempo) {
   };
 }
 
+// Onde está a ponta do braço do guindaste num instante
+function pontaDoBraco(obstaculo, tempo) {
+  const angulo = obstaculo.anguloNaChegada + obstaculo.giro * (tempo - obstaculo.chegada);
+  const braco = TIPOS_OBSTACULO.guindaste.bracoKm;
+  return { x: obstaculo.base.x + Math.cos(angulo) * braco, y: obstaculo.base.y + Math.sin(angulo) * braco };
+}
+
+// O que o SENSOR mede: o ponto do obstáculo mais perigoso para o drone, agora e 1 segundo antes.
+// Nos pássaros é o centro do bando. No guindaste, o braço INTEIRO é perigoso:
+// o ponto que importa é o do braço mais perto do drone (projeção no segmento).
+export function medirObstaculo(obstaculo, tempo, drone) {
+  if (obstaculo.tipo !== 'guindaste') {
+    return { agora: posicaoObstaculo(obstaculo, tempo), antes: posicaoObstaculo(obstaculo, tempo - 1) };
+  }
+
+  const base = obstaculo.base;
+  const ponta = pontaDoBraco(obstaculo, tempo);
+  const dx = ponta.x - base.x;
+  const dy = ponta.y - base.y;
+  // "f" diz onde fica o ponto do braço mais perto do drone: 0 = na torre, 1 = na ponta
+  let f = ((drone.x - base.x) * dx + (drone.y - base.y) * dy) / (dx * dx + dy * dy);
+  f = Math.max(0, Math.min(1, f));
+
+  // O mesmo pedaço do braço, 1 segundo antes (o braço girou um pouco)
+  const pontaAntes = pontaDoBraco(obstaculo, tempo - 1);
+  return {
+    agora: { x: base.x + dx * f, y: base.y + dy * f },
+    antes: { x: base.x + (pontaAntes.x - base.x) * f, y: base.y + (pontaAntes.y - base.y) * f },
+  };
+}
+
 // Algum obstáculo está a até "raioKm" do ponto? (usado para o mapa aproximar o zoom)
 export function algumObstaculoPerto(obstaculos, tempo, ponto, raioKm) {
   return (obstaculos || []).some((obstaculo) => {
-    const p = posicaoObstaculo(obstaculo, tempo);
+    const p = medirObstaculo(obstaculo, tempo, ponto).agora;
     return Math.sqrt((p.x - ponto.x) ** 2 + (p.y - ponto.y) ** 2) <= raioKm;
   });
 }
@@ -81,12 +112,8 @@ export function desenhoObstaculo(obstaculo, tempo) {
   const desenho = { tipo: obstaculo.tipo, posicao: posicaoObstaculo(obstaculo, tempo), bolhaKm: tipo.bolhaKm };
 
   if (obstaculo.tipo === 'guindaste') {
-    const angulo = obstaculo.anguloNaChegada + obstaculo.giro * (tempo - obstaculo.chegada);
     desenho.base = obstaculo.base;
-    desenho.ponta = {
-      x: obstaculo.base.x + Math.cos(angulo) * tipo.bracoKm,
-      y: obstaculo.base.y + Math.sin(angulo) * tipo.bracoKm,
-    };
+    desenho.ponta = pontaDoBraco(obstaculo, tempo);
   }
   return desenho;
 }
