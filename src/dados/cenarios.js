@@ -14,7 +14,7 @@ export const CENARIOS = [
   {
     id: 'pane-rodovia',
     titulo: 'Pane sobre a rodovia',
-    descricao: 'Pane em cima da Anhanguera: desvia para a zona de pouso.',
+    descricao: 'Pane em cima da Anhanguera: volta para o hub, o lugar mais seguro.',
     destino: 'aldeia-jaragua',
     prioridade: 'saude',
     bateria: 60,

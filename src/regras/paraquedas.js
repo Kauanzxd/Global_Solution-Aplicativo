@@ -102,11 +102,11 @@ export function pontosCandidatos(local, alcance) {
 }
 
 // Para comparar riscos: quanto menor o número, melhor.
-// Uma zona de pouso oficial é melhor que qualquer ponto improvisado.
-const ORDEM_RISCO = { zona: 0, baixo: 1, medio: 2, alto: 3, proibido: 4 };
+// O hub é o melhor lugar de todos; depois, uma zona de pouso oficial; depois, pontos improvisados.
+const ORDEM_RISCO = { hub: 0, zona: 1, baixo: 2, medio: 3, alto: 4, proibido: 5 };
 
 // Riscos aceitáveis: aqui não há gente nem trânsito embaixo
-const ACEITAVEIS = ['zona', 'baixo', 'medio'];
+const ACEITAVEIS = ['hub', 'zona', 'baixo', 'medio'];
 
 // Escolhe onde pousar de paraquedas, a partir do local e da altitude da falha.
 // "incertezaKm" (opcional): sem GPS, o drone amplia as faixas de segurança nesse tanto.
@@ -117,7 +117,9 @@ export function escolherPouso(local, altitude, zonas, areas, vias, vento = SEM_V
   const confortavel = areaDeAlcance(local, altitude, MARGEM_POUSO_M, vento);
 
   // Todas as opções: zonas de pouso + pontos candidatos dentro da área de alcance
-  const opcoesZonas = zonas.map((zona) => ({ ponto: zona, risco: 'zona', nome: zona.id }));
+  const opcoesZonas = zonas.map((zona) =>
+    zona.ehHub ? { ponto: zona, risco: 'hub', nome: 'o hub' } : { ponto: zona, risco: 'zona', nome: zona.id }
+  );
   const opcoesPontos = pontosCandidatos(alcance.centro, alcance.raio).map((ponto) => {
     const risco = riscoNoPonto(ponto, areas, vias, incertezaKm, evitar);
     return { ponto, risco, nome: `área de risco ${NOMES_RISCO[risco]}` };

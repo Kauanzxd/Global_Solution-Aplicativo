@@ -468,9 +468,28 @@ function abrirParaquedas(voo, local, altitude, regiao, motivo) {
   };
 }
 
-// Desvia para a zona de pouso mais próxima, com os motores bons, a 120 m.
-function desviarParaZona(voo, local, regiao, motivo) {
-  const { zona } = zonaMaisProxima(local, regiao.zonas);
+// Para onde ir numa emergência com os motores bons: o HUB é sempre o melhor lugar
+// (área controlada da SADEC). Ele é escolhido se der para chegar lá com segurança:
+//   - bateria para chegar com a margem de 30% (e o gasto extra se estiver quente);
+//   - sem GPS, o erro da posição não pode passar do máximo no caminho até lá.
+// Senão, a zona controlada mais próxima.
+function escolherZona(voo, local, regiao) {
+  const hub = regiao.zonas.find((zona) => zona.ehHub);
+  if (hub) {
+    const distancia = distanciaKm(local, hub);
+    const fator = voo.temperaturaAlta ? FATOR_KM_TEMPERATURA_ALTA : 1;
+    const bateriaOk = (voo.bateria ?? 100) >= bateriaParaChegar(distancia) * fator;
+    const segundosAteLa = distancia / VELOCIDADE_CRUZEIRO_KM_S;
+    const gpsOk = !voo.semGps || voo.incerteza + INCERTEZA_POR_SEGUNDO_M * segundosAteLa <= INCERTEZA_MAXIMA_M;
+    if (bateriaOk && gpsOk) return hub;
+  }
+  return zonaMaisProxima(local, regiao.zonas).zona;
+}
+
+// Desvia para uma zona controlada (o hub, se der), com os motores bons, a 120 m.
+// "imediato": true = vai para a zona MAIS PRÓXIMA, sem preferir o hub (ex.: risco de incêndio)
+function desviarParaZona(voo, local, regiao, motivo, imediato = false) {
+  const zona = imediato ? zonaMaisProxima(local, regiao.zonas).zona : escolherZona(voo, local, regiao);
   return {
     ...continuar(voo),
     origem: local,
@@ -535,7 +554,9 @@ function falhaMotor(voo, local, altitude, regiao, motivo) {
   if (seguras.length === 0) {
     return abrirParaquedas(voo, local, altitude, regiao, `${motivo} Nenhuma zona alcançável com segurança.`);
   }
-  return seguirComMotorFraco(voo, local, altitude, seguras[0].zona, regiao, motivo);
+  // Entre as zonas em que ele chega com folga, o hub é o preferido; senão, a mais perto
+  const hubSeguro = seguras.find((a) => a.zona.ehHub);
+  return seguirComMotorFraco(voo, local, altitude, (hubSeguro || seguras[0]).zona, regiao, motivo);
 }
 
 // ---------- GPS ----------
@@ -699,7 +720,7 @@ function temperaturaAlta(voo, local, regiao, motivo) {
 function temperaturaCritica(voo, local, regiao, motivo) {
   const { zona, distancia } = zonaMaisProxima(local, regiao.zonas);
   if (distancia <= DISTANCIA_MAXIMA_CRITICA_KM) {
-    return desviarParaZona(voo, local, regiao, `${motivo} Pouso imediato.`);
+    return desviarParaZona(voo, local, regiao, `${motivo} Pouso imediato.`, true);
   }
 
   // Procura, num raio de 1 km, o ponto seguro (sem via nem bairro) mais perto
@@ -707,7 +728,7 @@ function temperaturaCritica(voo, local, regiao, motivo) {
     .filter((ponto) => seguroParaPairar(ponto, incertezaDoVoo(voo) / 1000, regiao))
     .sort((a, b) => distanciaKm(local, a) - distanciaKm(local, b));
 
-  if (seguros.length === 0) return desviarParaZona(voo, local, regiao, `${motivo} Pouso imediato.`);
+  if (seguros.length === 0) return desviarParaZona(voo, local, regiao, `${motivo} Pouso imediato.`, true);
 
   const areaSegura = { ...seguros[0], id: 'área segura mais próxima' };
   return {
@@ -749,7 +770,10 @@ function falhaBateria(voo, local, altitude, regiao, motivo) {
   const jaIndoParaZona = voo.situacao === 'desviando' || voo.situacao === 'motor-fraco';
   const alvo = jaIndoParaZona
     ? { zona: voo.destino, distancia: distanciaKm(local, voo.destino) }
-    : zonaMaisProxima(local, regiao.zonas);
+    : (() => {
+        const zona = escolherZona(voo, local, regiao); // o hub, se der; senão, a mais próxima
+        return { zona, distancia: distanciaKm(local, zona) };
+      })();
 
   if (tem >= bateriaParaChegar(alvo.distancia) * fator) {
     if (jaIndoParaZona) return { ...voo, mensagem: `${motivo} Ainda chega ${comArtigo(alvo.zona, 'à')} com margem` };
