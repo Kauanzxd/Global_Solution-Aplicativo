@@ -893,12 +893,24 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
     tamanho = 1;
   }
 
+  // Drone imprevisível (zigue-zague): o lado do desvio fica TRAVADO do começo ao fim.
+  // Sem isso, o balanço dele faria o nosso drone trocar de lado a cada instante.
+  const errante = ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.comportamento === 'errante';
+  let ladoDesvio = voo.ladoDesvio;
+  if (errante) {
+    const ladoAgora = { x: fuga.x / tamanho, y: fuga.y / tamanho };
+    if (!ladoDesvio) ladoDesvio = ladoAgora; // primeiro tique do desvio: escolhe o lado
+    fuga = ladoDesvio;
+    tamanho = 1;
+  }
+
   // Mistura: um pouco para frente + bastante de lado
   let movimento = { x: direcao.x * 0.3 + fuga.x / tamanho, y: direcao.y * 0.3 + fuga.y / tamanho };
 
-  // Drone imprevisível (zigue-zague): ir só para o lado não basta, porque ele pode ir
-  // para o mesmo lado. O mais seguro é se AFASTAR dele de verdade, até recuando.
-  if (ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.comportamento === 'errante') {
+  // Drone imprevisível DENTRO da bolha de verdade: perigo imediato, o mais seguro é se
+  // AFASTAR dele, até recuando. Fora dela (só na margem extra), contorna pelo lado
+  // travado, avançando um pouco: assim o drone passa por ele em vez de ir e voltar.
+  if (errante && ameaca.distancia < bolhaDe(ameaca.obstaculo)) {
     movimento = { x: -ameaca.futuro.x, y: -ameaca.futuro.y };
   }
   const tamanhoMovimento = Math.sqrt(movimento.x ** 2 + movimento.y ** 2);
@@ -920,6 +932,7 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
     km: 0,
     hodometro: (voo.hodometro || 0) + passo,
     desviandoObstaculo: true,
+    ladoDesvio: errante ? ladoDesvio : voo.ladoDesvio,
     mensagem,
   };
 }
@@ -1250,8 +1263,8 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
 
     // O perigo passou: refaz a conta da bateria, porque o desvio gastou mais
     if (voo.desviandoObstaculo) {
-      const passou = { ...voo, desviandoObstaculo: false };
-      return falhaBateria(passou, posicaoAtual(passou), altitudeDoVoo(passou), regiao, 'Obstáculo para trás.');
+      const passou = { ...voo, desviandoObstaculo: false, ladoDesvio: undefined }; // destrava o lado
+      return falhaBateria(passou, posicaoAtual(passou), altitudeDoVoo(passou), regiao, 'Desvio concluído.');
     }
   }
 
