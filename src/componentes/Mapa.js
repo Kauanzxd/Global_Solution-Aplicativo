@@ -120,7 +120,8 @@ function Drone({ x, y }) {
 
 // "destino" é o local para onde o drone vai (um item de LOCAIS)
 // "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
-export default function Mapa({ destino, drone }) {
+// "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
+export default function Mapa({ destino, drone, desvio }) {
   const hub = LOCAIS.find((local) => local.id === 'hub');
   const posicaoDrone = drone || hub;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -219,6 +220,19 @@ export default function Mapa({ destino, drone }) {
             stroke="#0B5CAD"
             strokeWidth="0.7"
             strokeDasharray="2 1.5"
+          />
+        )}
+
+        {/* Desvio de emergência: linha laranja do ponto da pane até a zona de pouso */}
+        {desvio && (
+          <Line
+            x1={desvio.origem.x * ESCALA}
+            y1={desvio.origem.y * ESCALA}
+            x2={desvio.destino.x * ESCALA}
+            y2={desvio.destino.y * ESCALA}
+            stroke="#E08A00"
+            strokeWidth="0.9"
+            strokeDasharray="2 1"
           />
         )}
 
