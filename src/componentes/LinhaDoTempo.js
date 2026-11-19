@@ -2,8 +2,8 @@ import { StyleSheet, Text, View } from 'react-native';
 import { tipoDoEvento } from '../dados/tiposEventos';
 import { TEMA } from './tema';
 
-// A missão inteira numa barra: metade esquerda = ida (hub → destino),
-// metade direita = volta (destino → hub). Cada evento vira uma bolinha numerada
+// A missão inteira numa barra: metade esquerda = ida (filial → destino),
+// metade direita = volta (destino → filial). Cada evento vira uma bolinha numerada
 // no ponto da barra em que acontece.
 export default function LinhaDoTempo({ eventos, distanciaIda }) {
   const total = distanciaIda * 2; // ida + volta
@@ -31,9 +31,9 @@ export default function LinhaDoTempo({ eventos, distanciaIda }) {
 
       {/* Legenda embaixo da barra: onde a missão começa, onde entrega e onde termina */}
       <View style={styles.legenda}>
-        <Text style={styles.ponto}>Hub</Text>
+        <Text style={styles.ponto}>Filial</Text>
         <Text style={styles.ponto}>Entrega · km {distanciaIda.toFixed(1).replace('.', ',')}</Text>
-        <Text style={styles.ponto}>Hub</Text>
+        <Text style={styles.ponto}>Filial</Text>
       </View>
       <View style={styles.legenda}>
         <Text style={[styles.etapa, { color: TEMA.marca }]}>Ida</Text>

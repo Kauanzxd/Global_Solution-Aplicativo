@@ -164,11 +164,19 @@ export function posicaoNaRota(origem, destino, kmVoados) {
   };
 }
 
-// Nome de uma zona com o artigo certo: "a ZP-02" ou "o hub" (o hub é masculino).
-// forma: 'a' (para a ZP-02 / para o hub), 'à' (à ZP-02 / ao hub), 'na' (na ZP-02 / no hub)
+// Nome de uma zona com o artigo certo. Zonas ("a ZP-USP") e filiais ("a Filial Santana")
+// são femininas, então a regra é a mesma para as duas.
+// forma: 'a' (para a ZP-USP), 'à' (à ZP-USP), 'na' (na ZP-USP)
 function comArtigo(zona, forma) {
-  if (zona.ehHub) return { a: 'o hub', à: 'ao hub', na: 'no hub' }[forma];
   return { a: `a ${zona.id}`, à: `à ${zona.id}`, na: `na ${zona.id}` }[forma];
+}
+
+// A filial (no código, "hub") mais perto de um ponto. As filiais estão na lista de zonas
+// com ehHub: true, porque também são áreas seguras da SADEC.
+function filialMaisProxima(local, zonas) {
+  const filiais = zonas.filter((zona) => zona.ehHub);
+  if (filiais.length === 0) return null;
+  return filiais.reduce((melhor, filial) => (distanciaKm(local, filial) < distanciaKm(local, melhor) ? filial : melhor));
 }
 
 // Primeira letra maiúscula (para começar uma frase com o nome da zona)
@@ -287,7 +295,7 @@ function decolar(voo, eventos, passoKm, regiao) {
       ...voo,
       altitude: 0,
       situacao: 'queda',
-      mensagem: `Falha grave a ${altitude} m: sem altura para o paraquedas. Caiu dentro do hub, longe de ruas e pessoas`,
+      mensagem: `Falha grave a ${altitude} m: sem altura para o paraquedas. Caiu dentro da filial, longe de ruas e pessoas`,
     };
   }
 
@@ -295,14 +303,14 @@ function decolar(voo, eventos, passoKm, regiao) {
   if (evento) {
     const comParaquedas = evento.tipo === 'falha-grave';
     const mensagem = comParaquedas
-      ? 'Falha grave na decolagem! Paraquedas aberto, descendo sobre o hub'
-      : 'Problema na decolagem! Descendo de volta no hub';
+      ? 'Falha grave na decolagem! Paraquedas aberto, descendo sobre a filial'
+      : 'Problema na decolagem! Descendo de volta na filial';
     return iniciarDescida(
       { ...voo, paraquedasAberto: comParaquedas },
       altitude,
       mensagem,
       'pousou-hub',
-      'Pousou em segurança no hub da SADEC'
+      'Pousou em segurança na filial da SADEC'
     );
   }
 
@@ -310,7 +318,7 @@ function decolar(voo, eventos, passoKm, regiao) {
     // Chegou a 120 m: começa a andar. Se houver vento no km 0, ele começa a valer agora.
     const ventoNoKm0 = naIda ? eventos.find((e) => e.km === 0 && e.tipo === 'vento') : undefined;
     const vento = ventoNoKm0 ? criarVento(ventoNoKm0) : voo.vento;
-    let mensagem = naIda ? 'Voando...' : 'Voltando para o hub...';
+    let mensagem = naIda ? 'Voando...' : 'Voltando para a filial...';
     if (ventoNoKm0) mensagem = textoVento(vento);
     // O hodômetro conta a viagem inteira: na volta, continua de onde parou
     return { ...voo, altitude, situacao: 'voando', hodometro: voo.hodometro ?? 0, vento, mensagem };
@@ -337,9 +345,9 @@ function entregar(voo, passoKm, regiao) {
 
   const local = posicaoAtual(voo);
   const tem = voo.bateria ?? 100;
-  const hub = regiao.zonas.find((zona) => zona.ehHub);
+  const hub = filialMaisProxima(local, regiao.zonas);
 
-  // Para onde vai: o hub, se der; senão, a zona mais perto que dá para alcançar
+  // Para onde vai: a filial mais próxima, se der; senão, a zona mais perto que dá para alcançar
   let alvo = null;
   if (tem >= bateriaParaSairEChegar(distanciaKm(local, hub))) {
     alvo = hub;
@@ -382,10 +390,10 @@ function entregar(voo, passoKm, regiao) {
   }
 
   const mensagem = alvo.ehHub
-    ? 'Entrega feita! Decolando de volta para o hub'
-    : `Entrega feita! A bateria não cobre a volta ao hub: indo para ${comArtigo(alvo, 'a')}`;
+    ? `Entrega feita! Decolando para ${comArtigo(alvo, 'a')}`
+    : `Entrega feita! A bateria não cobre a volta à filial: indo para ${comArtigo(alvo, 'a')}`;
 
-  // Decola: o alvo da etapa passa a ser o hub (ou a zona), e a prioridade cai (está vazio)
+  // Decola: o alvo da etapa passa a ser a filial (ou a zona), e a prioridade cai (está vazio)
   return {
     ...continuar(voo),
     origem: local,
@@ -404,8 +412,8 @@ function entregar(voo, passoKm, regiao) {
 // Na ida: entregar e depois ainda chegar a uma zona de pouso. Na volta: chegar ao hub.
 function bateriaParaTerminar(voo, local, regiao) {
   if (voo.etapa === 'volta') {
-    const alvo = voo.destinoFinal; // o hub, ou a zona escolhida depois da entrega
-    const oQue = alvo.ehHub ? 'a volta ao hub' : `a ida ${comArtigo(alvo, 'à')}`;
+    const alvo = voo.destinoFinal; // a filial, ou a zona escolhida depois da entrega
+    const oQue = alvo.ehHub ? `a volta ${comArtigo(alvo, 'à')}` : `a ida ${comArtigo(alvo, 'à')}`;
     return { precisa: bateriaParaChegar(distanciaKm(local, alvo)), oQue };
   }
   const destino = voo.destinoFinal;
@@ -468,13 +476,13 @@ function abrirParaquedas(voo, local, altitude, regiao, motivo) {
   };
 }
 
-// Para onde ir numa emergência com os motores bons: o HUB é sempre o melhor lugar
-// (área controlada da SADEC). Ele é escolhido se der para chegar lá com segurança:
+// Para onde ir numa emergência com os motores bons: uma FILIAL é sempre o melhor lugar
+// (área controlada da SADEC). A mais próxima é escolhida se der para chegar lá com segurança:
 //   - bateria para chegar com a margem de 30% (e o gasto extra se estiver quente);
 //   - sem GPS, o erro da posição não pode passar do máximo no caminho até lá.
 // Senão, a zona controlada mais próxima.
 function escolherZona(voo, local, regiao) {
-  const hub = regiao.zonas.find((zona) => zona.ehHub);
+  const hub = filialMaisProxima(local, regiao.zonas);
   if (hub) {
     const distancia = distanciaKm(local, hub);
     const fator = voo.temperaturaAlta ? FATOR_KM_TEMPERATURA_ALTA : 1;
@@ -490,6 +498,11 @@ function escolherZona(voo, local, regiao) {
 // "imediato": true = vai para a zona MAIS PRÓXIMA, sem preferir o hub (ex.: risco de incêndio)
 function desviarParaZona(voo, local, regiao, motivo, imediato = false) {
   const zona = imediato ? zonaMaisProxima(local, regiao.zonas).zona : escolherZona(voo, local, regiao);
+  // Se é a zona mais próxima, a mensagem diz isso. Explica um caso que parecia contraditório:
+  // "não cobre a volta à filial (com margem)... desviando para a filial": sem margem, ela
+  // continua sendo a melhor opção quando é também a zona controlada mais perto.
+  const maisProxima = zonaMaisProxima(local, regiao.zonas).zona === zona;
+  const explicacao = maisProxima ? ', a zona controlada mais próxima' : '';
   return {
     ...continuar(voo),
     origem: local,
@@ -497,7 +510,7 @@ function desviarParaZona(voo, local, regiao, motivo, imediato = false) {
     km: 0,
     situacao: 'desviando',
     emergencia: true,
-    mensagem: `${motivo} Desviando para ${comArtigo(zona, 'a')}`,
+    mensagem: `${motivo} Desviando para ${comArtigo(zona, 'a')}${explicacao}`,
   };
 }
 
@@ -1038,14 +1051,20 @@ function chegarAoFim(voo, total) {
   if (voo.situacao === 'voando' && voo.etapa === 'volta') {
     const alvo = voo.destino;
     if (alvo.ehHub) {
-      return iniciarDescida(chegou, ALTITUDE_CRUZEIRO, 'Sobre o hub: descendo na vertical', 'missao-concluida', 'Missão concluída: de volta ao hub!');
+      return iniciarDescida(
+        chegou,
+        ALTITUDE_CRUZEIRO,
+        `Sobre ${comArtigo(alvo, 'a')}: descendo na vertical`,
+        'missao-concluida',
+        `Missão concluída: pousou ${comArtigo(alvo, 'na')}!`
+      );
     }
     return iniciarDescida(
       chegou,
       ALTITUDE_CRUZEIRO,
       `Sobre ${comArtigo(alvo, 'a')}: descendo na vertical`,
       'pouso-emergencia',
-      `Entrega concluída. Pouso seguro ${comArtigo(alvo, 'na')} (a bateria não cobria a volta ao hub)`
+      `Entrega concluída. Pouso seguro ${comArtigo(alvo, 'na')} (a bateria não cobria a volta à filial)`
     );
   }
 
@@ -1114,10 +1133,12 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
     }
   }
 
-  // Zonas controladas: as zonas de pouso E o hub (que também é uma área segura da SADEC).
+  // Zonas controladas: as zonas de pouso E as filiais (que também são áreas seguras da SADEC).
   // Em qualquer emergência, o drone procura uma delas, nunca o ponto de entrega.
+  // Se quem chamou não mandou filiais na lista, a filial de onde ele saiu entra nela.
   if (!regiao.zonas.some((zona) => zona.ehHub)) {
-    regiao = { ...regiao, zonas: [...regiao.zonas, { id: 'Hub SADEC', x: voo.hub.x, y: voo.hub.y, ehHub: true }] };
+    const nome = voo.hub.nome || 'Filial SADEC';
+    regiao = { ...regiao, zonas: [...regiao.zonas, { id: nome, x: voo.hub.x, y: voo.hub.y, ehHub: true }] };
   }
 
   // O relógio da simulação anda (os obstáculos se movem conforme esse tempo)

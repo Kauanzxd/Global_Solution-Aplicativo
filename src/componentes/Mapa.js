@@ -1,11 +1,16 @@
 import { useRef } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import Svg, { Circle, G, Line, Path, Polygon, Polyline, Rect, Text } from 'react-native-svg';
-import { AREAS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
+import { AREAS, CONTORNO, FILIAIS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
+import { RAIO_FILIAL_KM } from '../regras/cobertura';
 
 // O desenho usa um "papel" de 100 x 100 unidades (o viewBox).
-// Como o mapa tem 10 km, cada unidade vale 100 metros: multiplicamos km por 10.
+// Como o mapa tem 76 km, cada unidade vale 760 metros: multiplicamos km por 100 ÷ 76.
 const ESCALA = 100 / TAMANHO_KM;
+
+// Abaixo deste tamanho de vista (em km), o mapa mostra os detalhes: letras e nomes dos
+// hospitais, nomes das zonas. Na cidade inteira, os hospitais viram pontinhos.
+const VISTA_DETALHE_KM = 22;
 
 // ZOOM: a "vista" é o pedaço do papel que aparece na tela. Vista de 100 = mapa inteiro;
 // vista de 25 = só 1/4 do mapa em volta do drone (4 vezes mais perto; com 20 km, 5 km).
@@ -15,12 +20,13 @@ const ESCALA = 100 / TAMANHO_KM;
 
 // Cores de cada tipo de área e de via
 const CORES = {
-  terra: '#E3EFD3',
+  vizinhas: '#E4E1DA', // cidades vizinhas (fora do contorno)
   agua: '#6FA9D4',
   mata: '#B5D8A6',
-  urbano: '#E9DCC6',
-  urbanoBorda: '#CDB894',
+  urbano: '#EFE6D6', // a cidade
+  contorno: '#8C7B5E',
   pico: '#7A6A55',
+  alcance: '#0B5CAD',
 };
 
 // Cada tipo de via é desenhado com duas linhas: uma larga (borda) e uma fina por cima (miolo).
@@ -34,10 +40,8 @@ const ESTILO_VIA = {
 
 // Aparência de cada tipo de local: cor do círculo e a letra dentro dele
 const ESTILO_LOCAL = {
-  hub: { cor: '#0B5CAD', letra: 'S' },
+  hub: { cor: '#0B5CAD', letra: 'F' }, // filial da SADEC
   hospital: { cor: '#D32F2F', letra: 'H' },
-  ubs: { cor: '#2E7D32', letra: 'U' },
-  comunidade: { cor: '#8E5AB5', letra: 'C' },
 };
 
 // Transforma [[x, y], [x, y], ...] em km no texto "x,y x,y ..." que o SVG entende
@@ -65,28 +69,59 @@ function Rotulo({ x, y, texto, tamanho, s }) {
   );
 }
 
-// Um local no mapa: círculo colorido com uma letra + o nome embaixo.
-function Local({ local, s }) {
+// Quais locais ganham o nome escrito, sem um nome encostar no outro (como nos apps de mapa).
+// Os locais chegam já em ordem de importância; cada nome é uma "caixa" (retângulo) e só
+// entra se não cruzar nenhuma caixa que já entrou. Devolve um Set com os ids escolhidos.
+const TAMANHO_ROTULO_LOCAL = 2.4;
+
+function escolherRotulos(locais, s) {
+  const caixas = [];
+  const escolhidos = new Set();
+  const altura = TAMANHO_ROTULO_LOCAL * s * 1.2;
+
+  for (const local of locais) {
+    const largura = local.rotulo.length * TAMANHO_ROTULO_LOCAL * s * 0.55; // ≈ largura das letras
+    const caixa = { x: local.x * ESCALA - largura / 2, y: local.y * ESCALA + 5 * s - altura, largura, altura };
+    // Dois retângulos se cruzam se um não está totalmente à esquerda/direita/acima/abaixo do outro
+    const cruza = caixas.some(
+      (c) => caixa.x < c.x + c.largura && c.x < caixa.x + caixa.largura && caixa.y < c.y + c.altura && c.y < caixa.y + caixa.altura
+    );
+    if (!cruza) {
+      caixas.push(caixa);
+      escolhidos.add(local.id);
+    }
+  }
+  return escolhidos;
+}
+
+// Um local no mapa: círculo colorido com uma letra + o nome embaixo (se "comRotulo").
+// Sem "detalhe" (cidade inteira na tela): hospital vira um pontinho; filial, só o círculo.
+function Local({ local, s, detalhe, comRotulo = true }) {
   const estilo = ESTILO_LOCAL[local.tipo];
   const x = local.x * ESCALA;
   const y = local.y * ESCALA;
 
+  if (!detalhe) {
+    const raio = local.tipo === 'hub' ? 1.5 * s : 0.7 * s;
+    return <Circle cx={x} cy={y} r={raio} fill={estilo.cor} stroke="#FFFFFF" strokeWidth={0.3 * s} />;
+  }
+
   return (
     <G>
-      <Circle cx={x} cy={y} r={2.2 * s} fill={estilo.cor} stroke="#FFFFFF" strokeWidth={0.5 * s} />
-      <Text x={x} y={y + 1 * s} fontSize={2.8 * s} fontWeight="bold" fill="#FFFFFF" textAnchor="middle">
+      <Circle cx={x} cy={y} r={2 * s} fill={estilo.cor} stroke="#FFFFFF" strokeWidth={0.5 * s} />
+      <Text x={x} y={y + 0.9 * s} fontSize={2.5 * s} fontWeight="bold" fill="#FFFFFF" textAnchor="middle">
         {estilo.letra}
       </Text>
-      <Rotulo x={x} y={y + 5 * s} texto={local.rotulo} tamanho={2.4} s={s} />
+      {comRotulo && <Rotulo x={x} y={y + 5 * s} texto={local.rotulo} tamanho={TAMANHO_ROTULO_LOCAL} s={s} />}
     </G>
   );
 }
 
-// Uma zona de pouso: quadrado laranja com a letra "P" + o código embaixo.
-function ZonaPouso({ zona, s }) {
+// Uma zona de pouso: quadrado laranja com a letra "P" + o código embaixo (só com detalhe).
+function ZonaPouso({ zona, s, detalhe }) {
   const x = zona.x * ESCALA;
   const y = zona.y * ESCALA;
-  const lado = 3.6 * s;
+  const lado = (detalhe ? 3.6 : 2.2) * s;
 
   return (
     <G>
@@ -100,10 +135,12 @@ function ZonaPouso({ zona, s }) {
         stroke="#E08A00"
         strokeWidth={0.6 * s}
       />
-      <Text x={x} y={y + 1 * s} fontSize={2.6 * s} fontWeight="bold" fill="#E08A00" textAnchor="middle">
-        P
-      </Text>
-      <Rotulo x={x} y={y + 4.6 * s} texto={zona.id} tamanho={1.8} s={s} />
+      {detalhe && (
+        <Text x={x} y={y + 1 * s} fontSize={2.6 * s} fontWeight="bold" fill="#E08A00" textAnchor="middle">
+          P
+        </Text>
+      )}
+      {detalhe && <Rotulo x={x} y={y + 4.6 * s} texto={zona.id} tamanho={1.8} s={s} />}
     </G>
   );
 }
@@ -187,13 +224,14 @@ function IndicadorVento({ vento }) {
   );
 }
 
-// Selo "zoom" no canto, para quem assiste entender que o mapa aproximou
-function SeloZoom({ vezes }) {
+// Selo "zoom" no canto, para quem assiste entender que o mapa aproximou.
+// Mostra quanto a vista cobre (ex.: "Zoom: 1,2 km"), que diz mais que "63x".
+function SeloZoom({ km }) {
   return (
     <G>
-      <Rect x="74" y="2" width="24" height="7" rx="1.5" fill="#0B1F33" opacity="0.8" />
-      <Text x="86" y="6.8" fontSize="3" fontWeight="bold" fill="#FFFFFF" textAnchor="middle">
-        {`Zoom ${vezes.toFixed(1)}x`}
+      <Rect x="70" y="2" width="28" height="7" rx="1.5" fill="#0B1F33" opacity="0.8" />
+      <Text x="84" y="6.8" fontSize="3" fontWeight="bold" fill="#FFFFFF" textAnchor="middle">
+        {`Zoom: ${km.toFixed(1).replace('.', ',')} km`}
       </Text>
     </G>
   );
@@ -356,7 +394,10 @@ function MarcadorEvento({ marcador, s }) {
 }
 
 // "destino" é o local para onde o drone vai (um item de LOCAIS ou um ponto livre)
-// "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
+// "origem" é a filial de onde o drone sai (a rota tracejada começa nela)
+// "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica na filial de origem
+// "centro" (opcional): ponto { x, y } em km no meio da vista; sem ele, a vista segue o drone
+// "mostrarAlcance" (opcional): desenha o círculo de 10 km de cada filial
 // "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
 // "altitude" é a altura do drone em metros (0 = no chão)
 // "paraquedas" (opcional): paraquedas aberto. Na falha grave em voo, traz as áreas
@@ -370,6 +411,9 @@ function MarcadorEvento({ marcador, s }) {
 export default function Mapa({
   marcadores = [],
   destino,
+  origem,
+  centro,
+  mostrarAlcance = false,
   drone,
   desvio,
   altitude = 0,
@@ -382,16 +426,44 @@ export default function Mapa({
 }) {
   // Referência para a caixa do mapa: serve para medir onde ela está na tela na hora do toque
   const caixa = useRef(null);
-  const hub = LOCAIS.find((local) => local.id === 'hub');
-  const posicaoDrone = drone || hub;
+  const partida = origem || FILIAIS[0];
+  const posicaoDrone = drone || partida;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
-  const urbanas = AREAS.filter((area) => area.tipo === 'urbano');
+  const represas = AREAS.filter((area) => area.tipo === 'agua');
 
-  // Zoom: a vista fica centrada no drone, sem sair das bordas do mapa
+  // Zoom: a vista fica centrada no "centro" (ou no drone), sem sair das bordas do mapa
   const s = vista / 100; // escala dos símbolos
+  const meio = centro || posicaoDrone;
   const limitar = (valor) => Math.min(Math.max(valor, 0), 100 - vista);
-  const x0 = limitar(posicaoDrone.x * ESCALA - vista / 2);
-  const y0 = limitar(posicaoDrone.y * ESCALA - vista / 2);
+  const x0 = limitar(meio.x * ESCALA - vista / 2);
+  const y0 = limitar(meio.y * ESCALA - vista / 2);
+  const detalhe = vista / ESCALA <= VISTA_DETALHE_KM; // a vista mostra 22 km ou menos
+
+  // Só desenha os locais que aparecem na vista (com uma folguinha na borda): com 200 locais,
+  // isso deixa o mapa leve durante o voo, que redesenha a tela 20 vezes por segundo
+  const naVista = (ponto) => {
+    const px = ponto.x * ESCALA;
+    const py = ponto.y * ESCALA;
+    const folga = vista * 0.1;
+    return px >= x0 - folga && px <= x0 + vista + folga && py >= y0 - folga && py <= y0 + vista + folga;
+  };
+
+  // Locais na vista, do MENOS para o MAIS importante, porque no SVG o que vem por último fica
+  // por cima: hospitais, depois filiais, e a origem e o destino da rota no topo.
+  const importancia = (local) => {
+    if (local.id === partida.id || (destino && local.id === destino.id)) return 2;
+    return local.tipo === 'hub' ? 1 : 0;
+  };
+  const visiveis = LOCAIS.filter(naVista).sort((a, b) => importancia(a) - importancia(b));
+  // Os nomes são escolhidos na ordem contrária (o mais importante primeiro). Sem detalhe,
+  // só os locais da rota têm nome.
+  const candidatosRotulo = [...visiveis].reverse().filter((local) => detalhe || importancia(local) === 2);
+  const rotulados = escolherRotulos(candidatosRotulo, s);
+
+  // Cidades vizinhas: um retângulo do tamanho do mapa com um "furo" no formato da cidade.
+  // fillRule "evenodd": a parte que fica dentro dos dois contornos (a cidade) fica sem tinta.
+  const contornoSvg = CONTORNO.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x * ESCALA} ${y * ESCALA}`).join(' ');
+  const vizinhasSvg = `M 0 0 L 100 0 L 100 100 L 0 100 Z ${contornoSvg} Z`;
 
   // Toque → km.
   // 1. O toque vem em pixels da TELA (pageX/pageY).
@@ -408,7 +480,9 @@ export default function Mapa({
       };
       // Só aceita números de verdade, dentro do mapa
       const valido = Number.isFinite(ponto.x) && Number.isFinite(ponto.y);
-      if (valido) aoTocar({ x: Math.min(Math.max(ponto.x, 0), 10), y: Math.min(Math.max(ponto.y, 0), 10) });
+      // (o limite é o tamanho do mapa: antes estava fixo em 10 km, sobra do primeiro mapa)
+      const dentroDoMapa = (valor) => Math.min(Math.max(valor, 0), TAMANHO_KM);
+      if (valido) aoTocar({ x: dentroDoMapa(ponto.x), y: dentroDoMapa(ponto.y) });
     });
   };
 
@@ -418,15 +492,20 @@ export default function Mapa({
   return (
     <Pressable ref={caixa} style={styles.caixa} onPress={tocar} disabled={!aoTocar}>
       <Svg width="100%" height="100%" viewBox={`${x0} ${y0} ${vista} ${vista}`}>
-        {/* 1. Fundo: terra */}
-        <Rect x="0" y="0" width="100" height="100" fill={CORES.terra} />
+        {/* 1. Fundo: a cidade (área urbana) */}
+        <Rect x="0" y="0" width="100" height="100" fill={CORES.urbano} />
 
-        {/* 2. Mata Atlântica */}
+        {/* 2. Parques e mata */}
         {matas.map((area) => (
           <Polygon key={area.nome} points={paraPontosSvg(area.pontos)} fill={CORES.mata} />
         ))}
 
-        {/* 3. Rios e córregos (linhas azuis finas) */}
+        {/* 3. Represas */}
+        {represas.map((area) => (
+          <Polygon key={area.nome} points={paraPontosSvg(area.pontos)} fill={CORES.agua} />
+        ))}
+
+        {/* 4. Rios (linhas azuis) */}
         {RIOS.map((rio) => (
           <Polyline
             key={rio.nome}
@@ -439,7 +518,11 @@ export default function Mapa({
           />
         ))}
 
-        {/* 4. Pico do Jaraguá: um triângulo, o símbolo de montanha */}
+        {/* 5. Cidades vizinhas por cima de tudo isso (esmaecidas) e a linha do contorno */}
+        <Path d={vizinhasSvg} fill={CORES.vizinhas} fillRule="evenodd" opacity="0.95" />
+        <Path d={`${contornoSvg} Z`} fill="none" stroke={CORES.contorno} strokeWidth={0.5 * s} strokeDasharray={tracejado([1.5, 1], s)} />
+
+        {/* 6. Pico do Jaraguá: um triângulo, o símbolo de montanha */}
         <Polygon
           points={paraPontosSvg([
             [PICO.x, PICO.y - 0.35 * s],
@@ -450,20 +533,9 @@ export default function Mapa({
           stroke="#FFFFFF"
           strokeWidth={0.4 * s}
         />
-        <Rotulo x={PICO.x * ESCALA} y={(PICO.y - 0.6 * s) * ESCALA} texto={PICO.nome} tamanho={2.0} s={s} />
+        {detalhe && <Rotulo x={PICO.x * ESCALA} y={PICO.y * ESCALA - 1.4 * s} texto={PICO.nome} tamanho={2.0} s={s} />}
 
-        {/* 5. Áreas urbanas */}
-        {urbanas.map((area) => (
-          <Polygon
-            key={area.nome}
-            points={paraPontosSvg(area.pontos)}
-            fill={CORES.urbano}
-            stroke={CORES.urbanoBorda}
-            strokeWidth={0.4 * s}
-          />
-        ))}
-
-        {/* 6. Vias: primeiro todas as bordas, depois todos os miolos */}
+        {/* 7. Vias: primeiro todas as bordas, depois todos os miolos */}
         {VIAS.map((via) => (
           <Polyline
             key={`borda-${via.nome}`}
@@ -484,7 +556,24 @@ export default function Mapa({
           />
         ))}
 
-        {/* 7. Nomes das áreas (só as que têm "rotulo") */}
+        {/* Alcance das filiais: um círculo de 10 km em volta de cada uma. Onde dois ou mais
+            círculos se sobrepõem, a cor fica mais forte: é a cobertura dupla aparecendo */}
+        {mostrarAlcance &&
+          FILIAIS.map((filial) => (
+            <Circle
+              key={`alcance-${filial.id}`}
+              cx={filial.x * ESCALA}
+              cy={filial.y * ESCALA}
+              r={RAIO_FILIAL_KM * ESCALA}
+              fill={CORES.alcance}
+              fillOpacity="0.06"
+              stroke={CORES.alcance}
+              strokeOpacity="0.35"
+              strokeWidth={0.3 * s}
+            />
+          ))}
+
+        {/* 8. Nomes das áreas (só as que têm "rotulo") */}
         {AREAS.filter((area) => area.rotulo).map((area) => (
           <Rotulo
             key={`rotulo-${area.nome}`}
@@ -496,16 +585,16 @@ export default function Mapa({
           />
         ))}
 
-        {/* 8. Zonas de pouso */}
-        {ZONAS_POUSO.map((zona) => (
-          <ZonaPouso key={zona.id} zona={zona} s={s} />
+        {/* 9. Zonas de pouso */}
+        {ZONAS_POUSO.filter(naVista).map((zona) => (
+          <ZonaPouso key={zona.id} zona={zona} s={s} detalhe={detalhe} />
         ))}
 
-        {/* 9. Rota: linha tracejada do hub até o destino (só se houver destino) */}
+        {/* 10. Rota: linha tracejada da filial até o destino (só se houver destino) */}
         {destino && (
           <Line
-            x1={hub.x * ESCALA}
-            y1={hub.y * ESCALA}
+            x1={partida.x * ESCALA}
+            y1={partida.y * ESCALA}
             x2={destino.x * ESCALA}
             y2={destino.y * ESCALA}
             stroke="#0B5CAD"
@@ -558,10 +647,14 @@ export default function Mapa({
           <Obstaculo key={indice} obstaculo={obstaculo} s={s} />
         ))}
 
-        {/* 10. Locais: por cima do mapa e da rota */}
-        {LOCAIS.map((local) => (
-          <Local key={local.id} local={local} s={s} />
-        ))}
+        {/* 11. Locais: por cima do mapa e da rota. A origem e o destino sempre aparecem
+            com detalhe (letra e nome), mesmo com a cidade inteira na tela */}
+        {visiveis.map((local) => {
+          const daRota = local.id === partida.id || (destino && local.id === destino.id);
+          return (
+            <Local key={local.id} local={local} s={s} detalhe={detalhe || daRota} comRotulo={rotulados.has(local.id)} />
+          );
+        })}
 
         {/* Destino livre (escolhido tocando no mapa) */}
         {destinoLivre && <MarcadorDestino destino={destino} s={s} />}
@@ -586,7 +679,7 @@ export default function Mapa({
       <Svg style={StyleSheet.absoluteFill} viewBox="0 0 100 100" pointerEvents="none">
         {vento && <IndicadorVento vento={vento} />}
         {/* O selo só aparece no zoom forte (obstáculo perto), não na vista normal do voo */}
-        {vista < 40 && <SeloZoom vezes={100 / vista} />}
+        {vista / ESCALA < 3 && <SeloZoom km={vista / ESCALA} />}
       </Svg>
     </Pressable>
   );

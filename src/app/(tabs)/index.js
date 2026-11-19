@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import BuscaDestino from '../../componentes/BuscaDestino';
 import Cabecalho from '../../componentes/Cabecalho';
 import CenariosProntos from '../../componentes/CenariosProntos';
 import Contador from '../../componentes/Contador';
@@ -8,6 +9,7 @@ import Mapa from '../../componentes/Mapa';
 import Opcoes from '../../componentes/Opcoes';
 import Secao from '../../componentes/Secao';
 import { TEMA } from '../../componentes/tema';
+import { CENARIOS } from '../../dados/cenarios';
 import { AREAS, LOCAIS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../../dados/regiao';
 import { verificarDecolagem } from '../../regras/bateria';
 import { distanciaKm } from '../../regras/distancia';
@@ -16,8 +18,23 @@ import { tipoDoEvento } from '../../dados/tiposEventos';
 import { riscoNoPonto } from '../../regras/risco';
 import { altitudeDoVoo, avancarVoo, estaNoAr, incertezaDoVoo, posicaoNaRota } from '../../regras/voo';
 
-const hub = LOCAIS.find((local) => local.id === 'hub');
-const LOCAIS_DE_ENTREGA = LOCAIS.filter((local) => local.id !== 'hub');
+// As filiais (de onde os drones saem) e os hospitais (para onde levam as entregas)
+const FILIAIS_DO_MAPA = LOCAIS.filter((local) => local.tipo === 'hub');
+const HOSPITAIS_DO_MAPA = LOCAIS.filter((local) => local.tipo === 'hospital');
+
+// Zonas controladas para emergências: as zonas de pouso + todas as filiais.
+// Cada filial entra com ehHub: true e o nome dela (é o nome que aparece nas mensagens).
+const ZONAS_E_FILIAIS = [
+  ...ZONAS_POUSO,
+  ...FILIAIS_DO_MAPA.map((filial) => ({ id: filial.nome, x: filial.x, y: filial.y, ehHub: true })),
+];
+
+// De qual filial sai a missão: a mais perto do destino (é a que gasta menos bateria)
+function filialDaMissao(destino) {
+  return FILIAIS_DO_MAPA.reduce((melhor, filial) =>
+    distanciaKm(destino, filial) < distanciaKm(destino, melhor) ? filial : melhor
+  );
+}
 
 // Tipos de missão (a prioridade do drone), com uma cor para cada
 const MISSOES = [
@@ -26,14 +43,6 @@ const MISSOES = [
   { valor: 'saude', rotulo: 'Saúde', cor: '#2E7D32' },
   { valor: 'comercial', rotulo: 'Comercial', cor: '#0B5CAD' },
 ];
-
-// Como a simulação começa, antes de o usuário mexer em nada
-const CONFIGURACAO_INICIAL = {
-  destino: LOCAIS.find((local) => local.id === 'aldeia-jaragua'),
-  prioridade: 'saude',
-  bateria: 60,
-  eventos: [],
-};
 
 // Um cenário pronto → a configuração da tela (destino, missão, bateria e eventos).
 // Cada evento ganha um id próprio, igual aos adicionados à mão.
@@ -45,6 +54,9 @@ function configuracaoDoCenario(cenario) {
     eventos: cenario.eventos.map((evento, indice) => ({ id: `${cenario.id}-${indice}`, ...evento })),
   };
 }
+
+// Como a simulação começa: o primeiro cenário pronto (a entrega tranquila), sem eventos
+const CONFIGURACAO_INICIAL = { ...configuracaoDoCenario(CENARIOS[0]), eventos: [] };
 
 // Os eventos montados na tela → o formato que o voo (voo.js) entende.
 // Eventos depois do fim da rota (ida + volta) ficam de fora.
@@ -60,9 +72,10 @@ function eventosParaOVoo(eventos, distanciaIda) {
 }
 
 // Zoom: a "vista" é medida em unidades do desenho (o mapa inteiro tem 100).
-// Para pensar em km, convertemos: 1 km = 100 ÷ TAMANHO_KM unidades (com 20 km, 5 unidades).
+// Para pensar em km, convertemos: 1 km = 100 ÷ TAMANHO_KM unidades (com 76 km, ≈ 1,3 unidade).
 const UNIDADES_POR_KM = 100 / TAMANHO_KM;
-const VISTA_MONTAGEM = 100; // montando: o mapa inteiro, para tocar em qualquer ponto
+const VISTA_CIDADE = 100; // montando: a cidade inteira
+const KM_REGIAO = 12; // tocou numa região: aproxima para 12 km
 const VISTA_VOO = 10 * UNIDADES_POR_KM; // voando: 10 km em volta do drone, seguindo ele
 const VISTA_APROXIMADA = 1.2 * UNIDADES_POR_KM; // obstáculo a até 1 km: só 1,2 km em volta
 const RAIO_ZOOM_KM = 1;
@@ -72,25 +85,35 @@ const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
 const PASSO_KM = KM_POR_SEGUNDO * (PASSO_MS / 1000);
 const DECISOES_POR_TIQUE = 4; // 4 decisões por atualização da tela: reage mais rápido
 
+// Enquadramento de uma rota: o meio entre a filial e o destino, com folga em volta
+// (no mínimo 8 km, para não ficar perto demais em rotas curtas)
+function focoDaRota(destino) {
+  const origem = filialDaMissao(destino);
+  const centro = { x: (origem.x + destino.x) / 2, y: (origem.y + destino.y) / 2 };
+  return { centro, km: Math.max(distanciaKm(origem, destino) * 1.6, 8) };
+}
+
 // O destino escolhido é válido? Devolve o problema em texto, ou null se estiver tudo certo.
-function problemaDoDestino(destino) {
-  if (distanciaKm(hub, destino) < 0.3) return 'O destino está colado no hub: escolha um ponto mais longe.';
-  if (riscoNoPonto(destino, AREAS, VIAS) === 'proibido') {
+function problemaDoDestino(destino, origem) {
+  if (distanciaKm(origem, destino) < 0.3) return 'O destino está colado na filial: escolha um ponto mais longe.';
+  // Hospitais sempre podem receber (são pontos reais de entrega). Um ponto livre em cima
+  // de rodovia ou trilho, não.
+  if (destino.tipo !== 'hospital' && riscoNoPonto(destino, AREAS, VIAS) === 'proibido') {
     return 'O destino fica sobre uma rodovia ou trilho: não dá para pousar ali. Escolha outro ponto.';
   }
   return null;
 }
 
-// Onde cada evento planejado fica no mapa. Na ida, o km conta a partir do hub;
-// na volta, a partir do destino, no caminho de volta ao hub.
+// Onde cada evento planejado fica no mapa. Na ida, o km conta a partir da filial;
+// na volta, a partir do destino, no caminho de volta à filial.
 // Ida e volta usam a mesma linha, então cada marcador é empurrado um pouco para a
 // DIREITA do sentido do voo: ficam duas "faixas", como uma estrada de mão dupla.
-const AFASTAMENTO_FAIXA_KM = 0.5; // com o mapa de 20 km, 500 m separam bem as faixas na tela
+const AFASTAMENTO_FAIXA_KM = 0.35;
 
-function marcadoresDosEventos(eventos, destino, distanciaIda) {
+function marcadoresDosEventos(eventos, origem, destino, distanciaIda) {
   if (distanciaIda === 0) return [];
   // Direção da ida (tamanho 1) e a direita dela (girada 90°)
-  const ida = { x: (destino.x - hub.x) / distanciaIda, y: (destino.y - hub.y) / distanciaIda };
+  const ida = { x: (destino.x - origem.x) / distanciaIda, y: (destino.y - origem.y) / distanciaIda };
   const direitaDaIda = { x: -ida.y, y: ida.x };
 
   return eventos
@@ -98,8 +121,8 @@ function marcadoresDosEventos(eventos, destino, distanciaIda) {
       if (evento.km > distanciaIda * 2) return null; // fora da rota
       const naIda = evento.km <= distanciaIda;
       const ponto = naIda
-        ? posicaoNaRota(hub, destino, evento.km)
-        : posicaoNaRota(destino, hub, evento.km - distanciaIda);
+        ? posicaoNaRota(origem, destino, evento.km)
+        : posicaoNaRota(destino, origem, evento.km - distanciaIda);
       const lado = naIda ? 1 : -1; // na volta, a direita do drone é o outro lado da linha
       return {
         x: ponto.x + direitaDaIda.x * AFASTAMENTO_FAIXA_KM * lado,
@@ -111,10 +134,10 @@ function marcadoresDosEventos(eventos, destino, distanciaIda) {
     .filter((marcador) => marcador !== null);
 }
 
-// Um voo novo, parado no hub, pronto para decolar, com as escolhas do usuário
+// Um voo novo, parado na filial, pronto para decolar, com as escolhas do usuário
 function criarVoo(configuracao) {
   return {
-    origem: hub,
+    origem: filialDaMissao(configuracao.destino),
     destino: configuracao.destino,
     km: 0,
     altitude: 0,
@@ -123,6 +146,11 @@ function criarVoo(configuracao) {
     situacao: 'decolando',
     mensagem: 'Decolando...',
   };
+}
+
+// Número com vírgula e 1 casa (ex.: 6.25 → "6,3")
+function km1(numero) {
+  return numero.toFixed(1).replace('.', ',');
 }
 
 // Aba "Simular" (rota "/"): monta a simulação e mostra o drone voando.
@@ -135,6 +163,11 @@ export default function Simular() {
   // Qual cenário pronto está carregado (null = o usuário montou ou mexeu em algo)
   const [cenario, setCenario] = useState(null);
 
+  // Onde o mapa está olhando na montagem: null = a cidade inteira;
+  // { centro, km } = aproximado numa região (centro em km, tamanho da vista em km)
+  const [foco, setFoco] = useState(() => focoDaRota(CONFIGURACAO_INICIAL.destino));
+  const [mostrarAlcance, setMostrarAlcance] = useState(false);
+
   // Muda só um campo da configuração, mantendo os outros (o "..." copia o resto).
   // Mexeu em algo? Deixa de ser exatamente o cenário pronto.
   const mudar = (campo, valor) => {
@@ -142,21 +175,47 @@ export default function Simular() {
     setCenario(null);
   };
 
-  const carregarCenario = (escolhido) => {
-    setConfiguracao(configuracaoDoCenario(escolhido));
-    setCenario(escolhido.id);
+  // Escolheu um destino (pela busca ou por um cenário): o mapa enquadra a rota nova
+  const escolherDestino = (destino) => {
+    mudar('destino', destino);
+    setFoco(focoDaRota(destino));
   };
+
+  const carregarCenario = (escolhido) => {
+    const nova = configuracaoDoCenario(escolhido);
+    setConfiguracao(nova);
+    setCenario(escolhido.id);
+    setFoco(focoDaRota(nova.destino));
+  };
+
+  // Toque no mapa, em dois passos:
+  //   cidade inteira na tela → aproxima a região tocada;
+  //   já aproximado → escolhe o destino: o hospital mais perto do dedo ou o ponto livre.
+  const tocarNoMapa = (ponto) => {
+    if (foco === null) {
+      setFoco({ centro: ponto, km: KM_REGIAO });
+      return;
+    }
+    // Tolerância do dedo: 6% da vista (≈ 0,7 km com a vista de 12 km, uns 20 px na tela).
+    // Entre os hospitais dentro dela, fica o mais perto do toque.
+    const tolerancia = foco.km * 0.06;
+    const maisPerto = HOSPITAIS_DO_MAPA.reduce((a, b) => (distanciaKm(b, ponto) < distanciaKm(a, ponto) ? b : a));
+    const escolhido = distanciaKm(maisPerto, ponto) <= tolerancia ? maisPerto : null;
+    mudar('destino', escolhido || { id: 'ponto-livre', nome: 'Ponto no mapa', rotulo: 'Ponto no mapa', ...ponto });
+  };
+
+  const origem = filialDaMissao(configuracao.destino);
 
   // Os pontos de entrega têm gente: numa emergência, o drone evita descer perto deles.
   // Se o destino for um ponto livre do mapa, ele também entra nessa lista.
-  const destinoLivre = !LOCAIS.some((local) => local.id === configuracao.destino.id);
+  const destinoLivre = configuracao.destino.tipo !== 'hospital';
   const regiao = {
-    zonas: ZONAS_POUSO,
+    zonas: ZONAS_E_FILIAIS,
     areas: AREAS,
     vias: VIAS,
-    locais: destinoLivre ? [...LOCAIS_DE_ENTREGA, configuracao.destino] : LOCAIS_DE_ENTREGA,
+    locais: destinoLivre ? [...HOSPITAIS_DO_MAPA, configuracao.destino] : HOSPITAIS_DO_MAPA,
   };
-  const distanciaIda = distanciaKm(hub, configuracao.destino);
+  const distanciaIda = distanciaKm(origem, configuracao.destino);
   const eventos = eventosParaOVoo(configuracao.eventos, distanciaIda);
 
   // Enquanto o drone está no ar, um "relógio" avança o voo a cada PASSO_MS
@@ -177,36 +236,35 @@ export default function Simular() {
     return () => clearInterval(relogio);
   }, [emVoo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Antes de simular, o drone está parado no hub
-  const posicao = voo ? posicaoNaRota(voo.origem, voo.destino, voo.km) : hub;
+  // Antes de simular, o drone está parado na filial de origem
+  const posicao = voo ? posicaoNaRota(voo.origem, voo.destino, voo.km) : origem;
   const altitude = voo ? altitudeDoVoo(voo) : 0;
 
-  // Zoom suave: a cada atualização do voo, a vista anda 30% do caminho até o alvo
-  const [vista, setVista] = useState(VISTA_MONTAGEM);
+  // Tamanho da vista que o mapa deve ter agora (em unidades do desenho)
   const obstaculoPerto = voo !== null && algumObstaculoPerto(voo.obstaculos, voo.tempo, posicao, RAIO_ZOOM_KM);
-  let vistaAlvo = VISTA_MONTAGEM;
+  let vistaAlvo;
   if (voo !== null) vistaAlvo = obstaculoPerto && emVoo ? VISTA_APROXIMADA : VISTA_VOO;
+  else vistaAlvo = foco ? foco.km * UNIDADES_POR_KM : VISTA_CIDADE;
+
+  // Zoom suave: a cada atualização, a vista anda 30% do caminho até o alvo
+  const [vista, setVista] = useState(vistaAlvo);
   useEffect(() => {
     setVista((atual) => {
       const proxima = atual + (vistaAlvo - atual) * 0.3;
-      return Math.abs(vistaAlvo - proxima) < 0.5 ? vistaAlvo : proxima; // pertinho: encaixa no alvo
+      return Math.abs(vistaAlvo - proxima) < 0.2 ? vistaAlvo : proxima; // pertinho: encaixa no alvo
     });
-  }, [voo, vistaAlvo]);
+  }, [voo, vistaAlvo, vista]);
 
   const desvio = voo && voo.emergencia ? voo : null;
   const paraquedas = voo && voo.paraquedasAberto ? { alcance: voo.alcance, confortavel: voo.confortavel } : null;
 
   // Verificações antes de decolar
-  const problemaDestino = problemaDoDestino(configuracao.destino);
-  const decolagem = verificarDecolagem(hub, configuracao.destino, configuracao.bateria);
+  const problemaDestino = problemaDoDestino(configuracao.destino, origem);
+  const decolagem = verificarDecolagem(origem, configuracao.destino, configuracao.bateria);
   const precisa = Math.ceil(decolagem.necessariaComMargem);
   const podeIniciar = !problemaDestino && decolagem.pode;
 
-  // Atalhos de destino: os locais conhecidos + "Ponto no mapa" quando o usuário tocou no mapa
-  const opcoesDestino = LOCAIS_DE_ENTREGA.map((local) => ({ valor: local.id, rotulo: local.rotulo }));
-  if (destinoLivre) opcoesDestino.push({ valor: configuracao.destino.id, rotulo: 'Ponto no mapa' });
-
-  const missao = MISSOES.find((m) => m.valor === (voo ? configuracao.prioridade : configuracao.prioridade));
+  const missao = MISSOES.find((m) => m.valor === configuracao.prioridade);
 
   return (
     <ScrollView style={styles.tela} contentContainerStyle={styles.conteudo}>
@@ -215,6 +273,9 @@ export default function Simular() {
       <View style={styles.areaMapa}>
         <Mapa
           destino={configuracao.destino}
+          origem={voo ? voo.hub || voo.origem : origem}
+          centro={voo === null && foco ? foco.centro : undefined}
+          mostrarAlcance={mostrarAlcance}
           drone={posicao}
           desvio={desvio}
           altitude={altitude}
@@ -223,26 +284,45 @@ export default function Simular() {
           incerteza={voo ? incertezaDoVoo(voo) : 0}
           obstaculos={voo ? (voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo)) : []}
           vista={vista}
-          marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, configuracao.destino, distanciaIda) : []}
-          aoTocar={voo === null ? (ponto) => mudar('destino', { id: 'ponto-livre', rotulo: 'Ponto no mapa', ...ponto }) : undefined}
+          marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, origem, configuracao.destino, distanciaIda) : []}
+          aoTocar={voo === null ? tocarNoMapa : undefined}
         />
       </View>
 
       {voo === null ? (
         // ---------- MONTANDO A SIMULAÇÃO ----------
         <View>
-          <Text style={styles.dicaMapa}>Toque em qualquer ponto do mapa para escolher o destino</Text>
+          <View style={styles.linhaMapa}>
+            <Text style={styles.dicaMapa}>
+              {foco === null
+                ? 'Toque numa região para aproximar'
+                : 'Toque num hospital (ou em qualquer ponto) para escolher o destino'}
+            </Text>
+          </View>
+          <View style={styles.linhaMapa}>
+            {foco !== null ? (
+              <Pressable style={styles.chip} onPress={() => setFoco(null)}>
+                <Text style={styles.textoChip}>Ver a cidade inteira</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={[styles.chip, mostrarAlcance && styles.chipLigado]}
+              onPress={() => setMostrarAlcance(!mostrarAlcance)}
+            >
+              <Text style={[styles.textoChip, mostrarAlcance && styles.textoChipLigado]}>Alcance das filiais</Text>
+            </Pressable>
+          </View>
 
           <Secao titulo="Cenários prontos" dica="Comece por um deles e ajuste o que quiser, ou monte do zero abaixo">
             <CenariosProntos escolhido={cenario} aoEscolher={carregarCenario} />
           </Secao>
 
-          <Secao titulo="Destino" dica={`${distanciaKm(hub, configuracao.destino).toFixed(1).replace('.', ',')} km do hub (ida)`}>
-            <Opcoes
-              opcoes={opcoesDestino}
-              valor={configuracao.destino.id}
-              aoEscolher={(id) => mudar('destino', LOCAIS.find((local) => local.id === id) || configuracao.destino)}
-            />
+          <Secao titulo="Destino" dica={`Sai da ${origem.nome}, a filial mais próxima · ${km1(distanciaIda)} km (ida)`}>
+            <View style={styles.destinoAtual}>
+              <Text style={styles.destinoNome}>{configuracao.destino.nome}</Text>
+              {configuracao.destino.bairro ? <Text style={styles.destinoBairro}>{configuracao.destino.bairro}</Text> : null}
+            </View>
+            <BuscaDestino locais={HOSPITAIS_DO_MAPA} aoEscolher={escolherDestino} />
             {problemaDestino ? <Text style={styles.alerta}>{problemaDestino}</Text> : null}
           </Secao>
 
@@ -271,7 +351,7 @@ export default function Simular() {
 
           <Secao
             titulo={`Eventos (${configuracao.eventos.length})`}
-            dica={`Ida: km 0 a ${distanciaIda.toFixed(1).replace('.', ',')} · Volta: até o km ${(distanciaIda * 2).toFixed(1).replace('.', ',')}`}
+            dica={`Ida: km 0 a ${km1(distanciaIda)} · Volta: até o km ${km1(distanciaIda * 2)}`}
           >
             <EditorEventos
               eventos={configuracao.eventos}
@@ -296,8 +376,10 @@ export default function Simular() {
       ) : (
         // ---------- VOO ACONTECENDO ----------
         <View style={styles.painel}>
-          <Text style={[styles.missao, { color: missao.cor }]}>
-            {missao.rotulo} · Hub → {configuracao.destino.rotulo}
+          <Text style={[styles.missao, { color: missao.cor }]}>{missao.rotulo}</Text>
+          {/* voo.hub guarda a filial de saída (voo.origem muda a cada trecho do voo) */}
+          <Text style={styles.trajeto}>
+            {(voo.hub || voo.origem).nome} → {configuracao.destino.rotulo}
           </Text>
           <Text style={styles.status}>{voo.mensagem}</Text>
           <Text style={styles.bateria}>Bateria: {Math.round(voo.bateria)}%</Text>
@@ -323,10 +405,49 @@ const styles = StyleSheet.create({
   areaMapa: {
     marginTop: 20,
   },
-  dicaMapa: {
+  linhaMapa: {
     marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  dicaMapa: {
     fontSize: 13,
     textAlign: 'center',
+    color: TEMA.textoSuave,
+  },
+  chip: {
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: TEMA.borda,
+    backgroundColor: TEMA.cartao,
+  },
+  chipLigado: {
+    borderColor: TEMA.marca,
+    backgroundColor: TEMA.marca,
+  },
+  textoChip: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEMA.texto,
+  },
+  textoChipLigado: {
+    color: '#FFFFFF',
+  },
+  destinoAtual: {
+    marginBottom: 10,
+  },
+  destinoNome: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: TEMA.texto,
+  },
+  destinoBairro: {
+    marginTop: 2,
+    fontSize: 13,
     color: TEMA.textoSuave,
   },
   alerta: {
@@ -393,6 +514,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  trajeto: {
+    marginTop: 4,
+    fontSize: 13,
+    textAlign: 'center',
+    color: TEMA.textoSuave,
   },
   status: {
     marginTop: 10,

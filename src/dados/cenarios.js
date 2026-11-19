@@ -1,44 +1,45 @@
 // Cenários prontos: situações montadas com um toque, para demonstrar as regras do drone.
 // Depois de carregar, dá para mudar qualquer coisa (é só um ponto de partida).
-// "destino" é o id de um dos LOCAIS do mapa.
-// Os kms foram calibrados no mapa de 20 km: na rota Hub → Hosp. Taipas, por exemplo,
-// o drone cruza a Rodovia dos Bandeirantes entre o km 2,0 e o 2,3.
+// "destino" é o id de um hospital (src/dados/hospitais.js). A missão sai da filial mais
+// próxima do destino. Os kms foram calibrados no mapa da cidade inteira: na rota
+// Filial Itaim Bibi → Einstein (Morumbi), por exemplo, o drone cruza a Marginal Pinheiros
+// entre o km 1,9 e o 2,2.
 export const CENARIOS = [
   {
     id: 'tranquila',
     titulo: 'Entrega tranquila',
-    descricao: 'Ida, entrega e volta sem imprevistos.',
-    destino: 'aldeia-jaragua',
+    descricao: 'Ida, entrega e volta à filial sem imprevistos.',
+    destino: 'h098', // Hospital Japonês Santa Cruz, Vila Mariana (Filial Itaim Bibi)
     prioridade: 'saude',
     bateria: 60,
     eventos: [],
   },
   {
     id: 'pane-rodovia',
-    titulo: 'Pane sobre a rodovia',
-    descricao: 'Pane em cima da Bandeirantes: volta para o hub, o lugar mais seguro.',
-    destino: 'hosp-taipas',
+    titulo: 'Pane sobre a Marginal',
+    descricao: 'Pane em cima da Marginal Pinheiros: volta para a filial, o lugar mais seguro.',
+    destino: 'h095', // Hospital Israelita Albert Einstein, Morumbi (Filial Itaim Bibi)
     prioridade: 'saude',
     bateria: 60,
-    eventos: [{ tipo: 'pane', km: 2.15 }],
+    eventos: [{ tipo: 'pane', km: 2.05 }],
   },
   {
     id: 'falha-vento',
     titulo: 'Falha grave com vento',
-    descricao: 'Motores param sobre a Bandeirantes: paraquedas planando a favor do vento.',
-    destino: 'hosp-taipas',
+    descricao: 'Os motores param perto do Ibirapuera: o paraquedas plana com o vento até o parque.',
+    destino: 'h098',
     prioridade: 'emergencia',
     bateria: 60,
     eventos: [
-      { tipo: 'vento', km: 0.5, velocidade: 8, de: 'sul' },
-      { tipo: 'falha-grave', km: 2.15 },
+      { tipo: 'vento', km: 0.3, velocidade: 8, de: 'oeste' },
+      { tipo: 'falha-grave', km: 0.8 },
     ],
   },
   {
     id: 'motor',
     titulo: 'Motor falhando',
-    descricao: 'Um motor falha: o sistema de risco vê que chega com folga ao hub e volta para lá.',
-    destino: 'hosp-taipas',
+    descricao: 'Um motor falha: o sistema de risco vê que chega com folga à filial e volta para lá.',
+    destino: 'h095',
     prioridade: 'saude',
     bateria: 60,
     eventos: [{ tipo: 'motor', km: 1.5 }],
@@ -46,46 +47,46 @@ export const CENARIOS = [
   {
     id: 'gps',
     titulo: 'GPS perdido',
-    descricao: 'Sinal cai sobre a Bandeirantes: afasta-se, espera o sinal e volta para o hub.',
-    destino: 'hosp-taipas',
+    descricao: 'O sinal cai sobre a Marginal Pinheiros: afasta-se, espera o sinal e volta para a filial.',
+    destino: 'h095',
     prioridade: 'comercial',
     bateria: 60,
-    eventos: [{ tipo: 'gps', km: 2.15, duracao: 0 }],
+    eventos: [{ tipo: 'gps', km: 2.05, duracao: 0 }],
   },
   {
     id: 'orgao-transito',
     titulo: 'Órgão no tráfego aéreo',
-    descricao: 'Levando um órgão, cruza um drone comercial (ele cede) e um sem rádio (nós desviamos).',
-    destino: 'hosp-pirituba',
+    descricao: 'Levando um órgão ao HC, cruza um drone comercial (ele cede) e um sem rádio (nós desviamos).',
+    destino: 'h065', // Hospital das Clínicas da FMUSP, Cerqueira César (Filial Centro)
     prioridade: 'orgaos',
-    bateria: 70,
+    bateria: 60,
     eventos: [
-      { tipo: 'drone', km: 1.5, comunicacao: true, prioridade: 'comercial', comportamento: 'reto' },
-      { tipo: 'drone', km: 3.4, comunicacao: false, prioridade: 'comercial', comportamento: 'errante' },
+      { tipo: 'drone', km: 1.0, comunicacao: true, prioridade: 'comercial', comportamento: 'reto' },
+      { tipo: 'drone', km: 2.5, comunicacao: false, prioridade: 'comercial', comportamento: 'errante' },
     ],
   },
   {
     id: 'obstaculos',
     titulo: 'Guindaste e pássaros',
     descricao: 'Obstáculos em movimento na ida: desvio em tempo real, com zoom.',
-    destino: 'hosp-pirituba',
+    destino: 'h146', // Hospital São Camilo Pompeia (Filial Santana)
     prioridade: 'saude',
-    bateria: 70,
+    bateria: 60,
     eventos: [
-      { tipo: 'obstaculo', km: 1.5, objeto: 'guindaste' },
-      { tipo: 'obstaculo', km: 3.6, objeto: 'passaros' },
+      { tipo: 'obstaculo', km: 1.2, objeto: 'guindaste' },
+      { tipo: 'obstaculo', km: 3.4, objeto: 'passaros' },
     ],
   },
   {
     id: 'volta-dificil',
     titulo: 'Volta difícil',
-    descricao: 'Na volta, a bateria cai e depois a temperatura sobe: não chega mais ao hub e pousa numa zona.',
-    destino: 'hosp-perus',
+    descricao: 'Na volta, a bateria cai e depois a temperatura sobe: sem margem para a filial, pousa no Parque do Carmo.',
+    destino: 'h051', // Hospital Nova Iguatemi, São Mateus (Filial Cidade Líder; a rota cruza o Parque do Carmo)
     prioridade: 'saude',
-    bateria: 60,
+    bateria: 50,
     eventos: [
-      { tipo: 'bateria', km: 7.5, perda: 18 },
-      { tipo: 'temperatura', km: 8.5, grau: 'alta' },
+      { tipo: 'bateria', km: 5.5, perda: 13 },
+      { tipo: 'temperatura', km: 6, grau: 'alta' },
     ],
   },
 ];
