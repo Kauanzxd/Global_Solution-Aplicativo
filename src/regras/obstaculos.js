@@ -67,6 +67,14 @@ export function posicaoObstaculo(obstaculo, tempo) {
   };
 }
 
+// Algum obstáculo está a até "raioKm" do ponto? (usado para o mapa aproximar o zoom)
+export function algumObstaculoPerto(obstaculos, tempo, ponto, raioKm) {
+  return (obstaculos || []).some((obstaculo) => {
+    const p = posicaoObstaculo(obstaculo, tempo);
+    return Math.sqrt((p.x - ponto.x) ** 2 + (p.y - ponto.y) ** 2) <= raioKm;
+  });
+}
+
 // Dados para o mapa desenhar: posição do perigo, a bolha e, no guindaste, a base e a ponta do braço
 export function desenhoObstaculo(obstaculo, tempo) {
   const tipo = TIPOS_OBSTACULO[obstaculo.tipo];

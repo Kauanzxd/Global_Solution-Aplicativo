@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Cabecalho from '../../componentes/Cabecalho';
 import Mapa from '../../componentes/Mapa';
 import { AREAS, LOCAIS, VIAS, ZONAS_POUSO } from '../../dados/regiao';
-import { desenhoObstaculo } from '../../regras/obstaculos';
+import { algumObstaculoPerto, desenhoObstaculo } from '../../regras/obstaculos';
 import { altitudeDoVoo, avancarVoo, estaNoAr, incertezaDoVoo, posicaoNaRota } from '../../regras/voo';
 
 const hub = LOCAIS.find((local) => local.id === 'hub');
@@ -27,6 +27,11 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
 const EVENTOS = [{ tipo: 'obstaculo', km: 2, objeto: 'guindaste' }];
 const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
+
+// Zoom: com um obstáculo a até 600 m, o mapa aproxima para mostrar só 1,2 km em volta do drone (8x)
+const VISTA_NORMAL = 100;
+const VISTA_APROXIMADA = 12;
+const RAIO_ZOOM_KM = 0.6;
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
@@ -59,6 +64,18 @@ export default function Simular() {
 
   const posicao = posicaoNaRota(voo.origem, voo.destino, voo.km);
   const altitude = altitudeDoVoo(voo);
+
+  // Zoom suave: a cada atualização do voo, a vista anda 30% do caminho até o alvo
+  // (perto de um obstáculo: aproximada; senão: o mapa inteiro)
+  const [vista, setVista] = useState(VISTA_NORMAL);
+  const obstaculoPerto = algumObstaculoPerto(voo.obstaculos, voo.tempo, posicao, RAIO_ZOOM_KM);
+  const vistaAlvo = obstaculoPerto && emVoo ? VISTA_APROXIMADA : VISTA_NORMAL;
+  useEffect(() => {
+    setVista((atual) => {
+      const proxima = atual + (vistaAlvo - atual) * 0.3;
+      return Math.abs(vistaAlvo - proxima) < 0.5 ? vistaAlvo : proxima; // pertinho: encaixa no alvo
+    });
+  }, [voo, vistaAlvo]);
   // Depois de uma pane ou falha grave em voo, o trecho atual é o desvio
   const desvio = voo.emergencia ? voo : null;
   // Paraquedas aberto. Sobre o hub não há planeio: sem áreas de alcance, os círculos não aparecem.
@@ -77,6 +94,7 @@ export default function Simular() {
           vento={voo.vento}
           incerteza={incertezaDoVoo(voo)}
           obstaculos={(voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo))}
+          vista={vista}
         />
       </View>
       <Text style={styles.status}>{voo.mensagem}</Text>
