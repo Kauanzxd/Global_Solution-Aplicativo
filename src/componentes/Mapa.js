@@ -119,8 +119,10 @@ function Drone({ x, y }) {
 }
 
 // "destino" é o local para onde o drone vai (um item de LOCAIS)
-export default function Mapa({ destino }) {
+// "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
+export default function Mapa({ destino, drone }) {
   const hub = LOCAIS.find((local) => local.id === 'hub');
+  const posicaoDrone = drone || hub;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
   const urbanas = AREAS.filter((area) => area.tipo === 'urbano');
 
@@ -225,8 +227,8 @@ export default function Mapa({ destino }) {
           <Local key={local.id} local={local} />
         ))}
 
-        {/* 11. Drone: por último de tudo. Por enquanto, parado no hub */}
-        <Drone x={hub.x} y={hub.y} />
+        {/* 11. Drone: por último de tudo, para ficar por cima */}
+        <Drone x={posicaoDrone.x} y={posicaoDrone.y} />
       </Svg>
     </View>
   );

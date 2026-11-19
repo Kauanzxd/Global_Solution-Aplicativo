@@ -19,6 +19,8 @@
   de coautoria de IA.
 - Ao fim de cada passo, diga quais arquivos entram no commit e espere
   eu responder "Commit feito, siga".
+- Nesse momento, mostre também um botão "Commit feito, siga" na caixa
+  de próximo passo (wrap_up), para eu responder com um clique.
 
 ## Ao encerrar a sessão
 Quando eu disser que vamos parar ("vamos parar por aqui", "encerrar",
