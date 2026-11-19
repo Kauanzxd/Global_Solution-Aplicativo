@@ -15,8 +15,9 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // Ex.: [{ tipo: 'vento', km: 0.5, velocidade: 8, de: 'sul' }, { tipo: 'falha-grave', km: 1.7 }]
 // Motor: { tipo: 'motor', km: 3.5 } chega à ZP com folga;
 // { tipo: 'motor', km: 1.5 } não chegaria com folga, então abre o paraquedas na hora
+// GPS: { tipo: 'gps', km: 2 } o sinal volta; { tipo: 'gps', km: 2, recupera: false } não volta
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [{ tipo: 'motor', km: 3.5 }];
+const EVENTOS = [{ tipo: 'gps', km: 2, recupera: false }];
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho

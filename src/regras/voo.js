@@ -31,7 +31,10 @@ const PERDA_MOTOR_M_POR_KM = 40; // sem vento, perde 40 m de altura a cada km vo
 const DESCIDA_MOTOR_FRACO_MS = (PERDA_MOTOR_M_POR_KM * VELOCIDADE_MOTOR_FRACO_MS) / 1000; // ...ou 0,36 m/s
 const CHEGADA_SEGURA_M = 60; // só segue para a zona se a previsão for chegar com 60 m ou mais
 
-const NO_AR = ['decolando', 'voando', 'desviando', 'motor-fraco', 'planando', 'descendo'];
+// GPS
+const TIQUES_TENTANDO_GPS = 60; // fica 60 tiques (3 s na tela) parado tentando recuperar o sinal
+
+const NO_AR = ['decolando', 'voando', 'desviando', 'motor-fraco', 'sem-gps', 'planando', 'descendo'];
 
 export function estaNoAr(voo) {
   return NO_AR.includes(voo.situacao);
@@ -173,6 +176,52 @@ function abrirParaquedas(voo, local, altitude, regiao, motivo) {
   };
 }
 
+// Desvia para a zona de pouso mais próxima, com os motores bons, a 120 m.
+// "motivo" é o começo da mensagem (ex.: "Pane no km 1.5!").
+function desviarParaZona(voo, local, regiao, motivo) {
+  const { zona } = zonaMaisProxima(local, regiao.zonas);
+  return {
+    origem: local,
+    destino: zona,
+    km: 0,
+    situacao: 'desviando',
+    emergencia: true,
+    vento: voo.vento, // o vento continua soprando
+    mensagem: `${motivo} Desviando para a ${zona.id}`,
+  };
+}
+
+// ---------- GPS ----------
+// Sem GPS, o drone não sabe direito onde está. Ele para no ar (paira) e tenta
+// recuperar o sinal. Se voltar, segue a rota. Se não voltar, usa a navegação de
+// reserva (bússola + câmera), que é menos precisa: por segurança, vai para a
+// zona de pouso mais próxima em vez de continuar a entrega.
+// Evento: { tipo: 'gps', km: 2 } (o sinal volta) ou { tipo: 'gps', km: 2, recupera: false }
+
+function perderGps(voo, evento) {
+  return {
+    ...voo,
+    km: evento.km, // para exatamente onde perdeu o sinal
+    situacao: 'sem-gps',
+    tiquesPairando: 0,
+    gpsVolta: evento.recupera !== false, // se o evento não disser nada, o sinal volta
+    mensagem: `Sinal de GPS perdido no km ${evento.km}! Parado no ar, tentando recuperar...`,
+  };
+}
+
+// Um tique pairando sem GPS
+function pairarSemGps(voo, regiao) {
+  const tiques = voo.tiquesPairando + 1;
+  if (tiques < TIQUES_TENTANDO_GPS) return { ...voo, tiquesPairando: tiques };
+
+  // Acabou o tempo de tentativa
+  if (voo.gpsVolta) {
+    return { ...voo, situacao: 'voando', mensagem: 'Sinal de GPS recuperado! Seguindo a rota' };
+  }
+  const local = posicaoNaRota(voo.origem, voo.destino, voo.km);
+  return desviarParaZona(voo, local, regiao, 'GPS não voltou: navegação de reserva (bússola e câmera).');
+}
+
 // ---------- Sistema de risco do motor fraco ----------
 // Pergunta que o drone faz o tempo todo: "consigo chegar tranquilamente à zona
 // de pouso na minha condição atual?". A resposta vem da altitude prevista na chegada.
@@ -269,6 +318,9 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   if (voo.situacao === 'decolando') return decolar(voo, eventos);
   if (voo.situacao === 'descendo') return descer(voo);
 
+  // Sem GPS: parado no ar, tentando recuperar o sinal
+  if (voo.situacao === 'sem-gps') return pairarSemGps(voo, regiao);
+
   let passo = passoKm;
   if (voo.situacao === 'planando') passo = passoKm * VELOCIDADE_PARAQUEDAS;
   if (voo.situacao === 'motor-fraco') passo = passoKm * VELOCIDADE_MOTOR_FRACO;
@@ -296,16 +348,11 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
 
   if (evento && evento.tipo === 'pane') {
     const local = posicaoNaRota(voo.origem, voo.destino, evento.km);
-    const { zona } = zonaMaisProxima(local, regiao.zonas);
-    return {
-      origem: local,
-      destino: zona,
-      km: 0,
-      situacao: 'desviando',
-      emergencia: true,
-      vento: voo.vento, // o vento continua soprando
-      mensagem: `Pane no km ${evento.km}! Desviando para a ${zona.id}`,
-    };
+    return desviarParaZona(voo, local, regiao, `Pane no km ${evento.km}!`);
+  }
+
+  if (evento && evento.tipo === 'gps') {
+    return perderGps(voo, evento);
   }
 
   // Vento: não muda a rota (com motor, o drone compensa), mas fica guardado no voo.
