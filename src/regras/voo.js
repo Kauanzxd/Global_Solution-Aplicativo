@@ -9,7 +9,7 @@
 // Fases finais (no chão): 'entregue', 'pouso-emergencia', 'pouso-paraquedas',
 // 'pousou-hub' e 'queda'.
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
-import { ALTITUDE_MINIMA_PARAQUEDAS, MARGEM_POUSO_M, SEM_VENTO, escolherPouso } from './paraquedas.js';
+import { ALTITUDE_MINIMA_PARAQUEDAS, MARGEM_POUSO_M, SEM_VENTO, escolherPouso, vetorVento } from './paraquedas.js';
 
 export const ALTITUDE_CRUZEIRO = 120; // metros: teto comum para drones no Brasil
 const VELOCIDADE_PARAQUEDAS = 0.15; // planando, anda a 15% da velocidade normal
@@ -55,6 +55,17 @@ export function posicaoNaRota(origem, destino, kmVoados) {
   };
 }
 
+// Transforma um evento de vento ({ tipo: 'vento', velocidade: 8, de: 'sul' })
+// no vento guardado no voo: o vetor { x, y } em m/s + os dados para mostrar na tela
+function criarVento(evento) {
+  return { ...vetorVento(evento.velocidade, evento.de), velocidade: evento.velocidade, de: evento.de };
+}
+
+// Texto do vento para a tela. Ex.: "Vento do sul a 29 km/h"
+function textoVento(vento) {
+  return `Vento do ${vento.de} a ${Math.round(vento.velocidade * 3.6)} km/h`; // m/s × 3,6 = km/h
+}
+
 // Começa uma descida vertical: o drone para onde está e desce reto.
 // "situacaoFinal" e "mensagemFinal" valem quando ele tocar o chão.
 function iniciarDescida(voo, altitude, mensagem, situacaoFinal, mensagemFinal) {
@@ -78,9 +89,10 @@ function descer(voo) {
 function decolar(voo, eventos) {
   const altitude = Math.min(voo.altitude + VERTICAL_POR_PASSO_M, ALTITUDE_CRUZEIRO);
 
+  // O vento não é um problema na decolagem: ele só passa a valer quando o drone começa a andar
   const evento = eventos.find((e) => {
     const altitudeDoEvento = e.altitude ?? ALTITUDE_EVENTO_DECOLAGEM;
-    return e.km === 0 && voo.altitude < altitudeDoEvento && altitude >= altitudeDoEvento;
+    return e.km === 0 && e.tipo !== 'vento' && voo.altitude < altitudeDoEvento && altitude >= altitudeDoEvento;
   });
 
   // Falha grave baixa demais para o paraquedas: o drone cai, mas dentro do hub,
@@ -110,6 +122,12 @@ function decolar(voo, eventos) {
   }
 
   if (altitude === ALTITUDE_CRUZEIRO) {
+    // Chegou a 120 m: se houver vento no km 0, ele começa a valer agora
+    const ventoNoKm0 = eventos.find((e) => e.km === 0 && e.tipo === 'vento');
+    if (ventoNoKm0) {
+      const vento = criarVento(ventoNoKm0);
+      return { ...voo, altitude, situacao: 'voando', vento, mensagem: textoVento(vento) };
+    }
     return { ...voo, altitude, situacao: 'voando', mensagem: 'Voando...' };
   }
   return { ...voo, altitude };
@@ -189,8 +207,16 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
       km: 0,
       situacao: 'desviando',
       emergencia: true,
+      vento: voo.vento, // o vento continua soprando
       mensagem: `Pane no km ${evento.km}! Desviando para a ${zona.id}`,
     };
+  }
+
+  // Vento: não muda a rota (com motor, o drone compensa), mas fica guardado no voo.
+  // Se depois houver uma falha grave, o paraquedas vai levar o vento em conta.
+  if (evento && evento.tipo === 'vento') {
+    const vento = criarVento(evento);
+    return { ...voo, km: kmNovo, vento, mensagem: textoVento(vento) };
   }
 
   if (evento && evento.tipo === 'falha-grave') {

@@ -139,13 +139,48 @@ function Drone({ x, y, altitude, comParaquedas }) {
   );
 }
 
+// Indicador de vento no canto do mapa: uma seta para onde o vento empurra,
+// a velocidade em km/h e de onde ele vem
+function IndicadorVento({ vento }) {
+  const tamanho = Math.sqrt(vento.x ** 2 + vento.y ** 2); // Pitágoras: o tamanho do vetor
+  const ux = vento.x / tamanho; // direção do vento com tamanho 1 (vetor unitário)
+  const uy = vento.y / tamanho;
+  const px = -uy; // perpendicular: a mesma direção girada 90°, para abrir a ponta da seta
+  const py = ux;
+
+  const cx = 8; // centro da seta (no desenho, não em km)
+  const cy = 92;
+  const ponta = { x: cx + ux * 4, y: cy + uy * 4 };
+  const cauda = { x: cx - ux * 4, y: cy - uy * 4 };
+  const cabeca = [
+    [ponta.x, ponta.y],
+    [ponta.x - ux * 2 + px * 1.4, ponta.y - uy * 2 + py * 1.4],
+    [ponta.x - ux * 2 - px * 1.4, ponta.y - uy * 2 - py * 1.4],
+  ];
+
+  return (
+    <G>
+      <Rect x="2" y="86" width="26" height="12" rx="1.5" fill="#FFFFFF" opacity="0.9" />
+      <Line x1={cauda.x} y1={cauda.y} x2={ponta.x} y2={ponta.y} stroke="#0B5CAD" strokeWidth="0.8" />
+      <Polygon points={cabeca.map(([x, y]) => `${x},${y}`).join(' ')} fill="#0B5CAD" />
+      <Text x="15" y="91" fontSize="2.6" fontWeight="bold" fill="#2B3440">
+        {`${Math.round(vento.velocidade * 3.6)} km/h`}
+      </Text>
+      <Text x="15" y="95.5" fontSize="2.2" fill="#2B3440">
+        {`do ${vento.de}`}
+      </Text>
+    </G>
+  );
+}
+
 // "destino" é o local para onde o drone vai (um item de LOCAIS)
 // "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
 // "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
 // "altitude" é a altura do drone em metros (0 = no chão)
 // "paraquedas" (opcional): paraquedas aberto. Na falha grave em voo, traz as áreas
 // { alcance, confortavel }, cada uma um círculo { centro, raio } em km
-export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas }) {
+// "vento" (opcional): { x, y, velocidade, de } — aparece como seta no canto
+export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas, vento }) {
   const hub = LOCAIS.find((local) => local.id === 'hub');
   const posicaoDrone = drone || hub;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -298,6 +333,9 @@ export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas 
           altitude={altitude}
           comParaquedas={Boolean(paraquedas) && altitude > 0}
         />
+
+        {/* 12. Indicador de vento (só quando há vento) */}
+        {vento && <IndicadorVento vento={vento} />}
       </Svg>
     </View>
   );

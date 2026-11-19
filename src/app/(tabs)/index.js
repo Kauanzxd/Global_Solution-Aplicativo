@@ -11,8 +11,12 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // Por enquanto o cenário é fixo. No passo 4, quem monta é o usuário.
 // Outros testes: [{ tipo: 'pane', km: 1.5 }], [{ tipo: 'falha-grave', km: 0 }] ou
 // [{ tipo: 'falha-grave', km: 0, altitude: 20 }]. km 0 = durante a decolagem.
+// Vento: velocidade em m/s e "de" = de onde vem (norte, sul, leste, oeste, nordeste...)
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [{ tipo: 'falha-grave', km: 1.7 }]; // bem em cima da Rodovia Anhanguera
+const EVENTOS = [
+  { tipo: 'vento', km: 0.5, velocidade: 8, de: 'sul' },
+  { tipo: 'falha-grave', km: 1.7 }, // bem em cima da Rodovia Anhanguera
+];
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
@@ -59,6 +63,7 @@ export default function Simular() {
           desvio={desvio}
           altitude={altitude}
           paraquedas={paraquedas}
+          vento={voo.vento}
         />
       </View>
       <Text style={styles.status}>{voo.mensagem}</Text>
