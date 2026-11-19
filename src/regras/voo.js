@@ -22,6 +22,13 @@ import {
   bateriaParaEntregarEIrAZona,
 } from './bateria.js';
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
+import {
+  ANTECEDENCIA_KM,
+  DETECCAO_SENSOR_KM,
+  TIPOS_OBSTACULO,
+  criarObstaculo,
+  posicaoObstaculo,
+} from './obstaculos.js';
 import { riscoNoPonto } from './risco.js';
 import {
   ALTITUDE_MINIMA_PARAQUEDAS,
@@ -63,6 +70,12 @@ const CONSUMO_TEMPERATURA_ALTA = 1.1; // gasta 10% a mais por segundo
 // Por km, gasta mais ainda: demora 1/0,8 do tempo × 1,1 por segundo ≈ 1,4 vez o normal
 const FATOR_KM_TEMPERATURA_ALTA = CONSUMO_TEMPERATURA_ALTA / VELOCIDADE_TEMPERATURA_ALTA;
 const DISTANCIA_MAXIMA_CRITICA_KM = 1; // em temperatura crítica, só vai a uma zona até 1 km
+
+// Desvio de obstáculos: segurança primeiro, o gasto não importa
+const POTENCIA_MAXIMA = 1.5; // no desvio, anda 1,5 vez mais rápido
+const CONSUMO_DESVIO = 2; // e gasta o dobro por segundo
+const HORIZONTE_PREVISAO_S = 60; // só se preocupa com aproximações nos próximos 60 s
+const VELOCIDADE_DRONE_KM_S = 0.015; // 15 m/s
 
 // Bateria: quantos segundos de verdade cada tique representa nas fases paradas.
 // (Andando, o tique é o tempo de voar o pedaço do caminho: 0,05 km a 15 m/s ≈ 3,3 s.)
@@ -123,6 +136,8 @@ function continuar(voo) {
     hodometro: voo.hodometro || 0,
     bateria: voo.bateria,
     temperaturaAlta: voo.temperaturaAlta,
+    tempo: voo.tempo, // relógio da simulação, em segundos
+    obstaculos: voo.obstaculos, // obstáculos em movimento já em cena
     destinoFinal: voo.destinoFinal, // o ponto de entrega, para retomar a rota se der
     // GPS
     semGps: voo.semGps,
@@ -143,7 +158,8 @@ function segundosDoTique(voo, passoKm) {
 function consumoDoTique(voo, passoKm) {
   // De paraquedas, os motores estão desligados: não gasta nada
   if (voo.situacao === 'planando' || (voo.situacao === 'descendo' && voo.paraquedasAberto)) return 0;
-  const extra = voo.temperaturaAlta ? CONSUMO_TEMPERATURA_ALTA : 1; // bateria quente rende menos
+  let extra = voo.temperaturaAlta ? CONSUMO_TEMPERATURA_ALTA : 1; // bateria quente rende menos
+  if (voo.desviandoObstaculo) extra *= CONSUMO_DESVIO; // potência máxima no desvio
   return CONSUMO_POR_SEGUNDO * segundosDoTique(voo, passoKm) * extra;
 }
 
@@ -572,6 +588,92 @@ function falhaBateria(voo, local, altitude, regiao, motivo) {
   return abrirParaquedas(voo, local, altitude, regiao, `${motivo} Sem bateria para chegar com segurança a uma zona.`);
 }
 
+// ---------- Obstáculos em movimento ----------
+// A cada tique, para cada obstáculo que os sensores enxergam (até 400 m), o drone:
+//   1. mede a posição e a velocidade dele (comparando com 1 segundo antes);
+//   2. prevê o PONTO DE MAIOR APROXIMAÇÃO: se os dois seguirem assim, quando e a
+//      que distância vão ficar um do outro;
+//   3. se essa distância for menor que a bolha de segurança, desvia AGORA, com
+//      potência máxima, para o lado que o afasta de onde o obstáculo vai estar.
+// Como tudo é refeito a cada tique, se o obstáculo mudar de rumo, o desvio muda junto.
+// Evento: { tipo: 'obstaculo', km: 2, objeto: 'passaros' } ou objeto: 'guindaste'
+
+// Direção (tamanho 1) do drone até o alvo do trecho atual
+function direcaoDoTrecho(voo) {
+  const local = posicaoAtual(voo);
+  const total = distanciaKm(local, voo.destino);
+  if (total === 0) return { x: 0, y: 0 };
+  return { x: (voo.destino.x - local.x) / total, y: (voo.destino.y - local.y) / total };
+}
+
+// A ameaça mais urgente, ou null se nenhum obstáculo vai chegar perto demais
+function ameacaMaisUrgente(voo) {
+  const local = posicaoAtual(voo);
+  const direcao = direcaoDoTrecho(voo);
+  const velocidadeDrone = { x: direcao.x * VELOCIDADE_DRONE_KM_S, y: direcao.y * VELOCIDADE_DRONE_KM_S };
+  let maisUrgente = null;
+
+  for (const obstaculo of voo.obstaculos || []) {
+    const agora = posicaoObstaculo(obstaculo, voo.tempo);
+    const distancia = distanciaKm(local, agora);
+    if (distancia > DETECCAO_SENSOR_KM) continue; // o sensor ainda não enxerga
+
+    // 1. Velocidade medida pelo sensor: quanto andou no último segundo
+    const antes = posicaoObstaculo(obstaculo, voo.tempo - 1);
+    const velocidadeObstaculo = { x: agora.x - antes.x, y: agora.y - antes.y };
+
+    // 2. Ponto de maior aproximação, com posição e velocidade RELATIVAS
+    const r = { x: agora.x - local.x, y: agora.y - local.y }; // onde ele está, visto do drone
+    const v = { x: velocidadeObstaculo.x - velocidadeDrone.x, y: velocidadeObstaculo.y - velocidadeDrone.y };
+    const v2 = v.x ** 2 + v.y ** 2;
+    const t = v2 > 0 ? Math.max(0, -(r.x * v.x + r.y * v.y) / v2) : 0; // segundos até lá
+    const futuro = { x: r.x + v.x * t, y: r.y + v.y * t }; // onde ele estará, visto do drone
+    const menorDistancia = Math.sqrt(futuro.x ** 2 + futuro.y ** 2);
+
+    // 3. Vai entrar na bolha nos próximos 60 s? É uma ameaça. Fica com a mais próxima no tempo.
+    const bolha = TIPOS_OBSTACULO[obstaculo.tipo].bolhaKm;
+    if (t <= HORIZONTE_PREVISAO_S && menorDistancia < bolha && (!maisUrgente || t < maisUrgente.t)) {
+      maisUrgente = { obstaculo, t, futuro, distancia, direcao };
+    }
+  }
+  return maisUrgente;
+}
+
+// Um tique de desvio: anda com potência máxima, quase de lado, para longe de onde o obstáculo vai estar
+function desviarDeObstaculo(voo, ameaca, passoKm) {
+  const local = posicaoAtual(voo);
+  const { direcao, futuro } = ameaca;
+
+  // Para longe do ponto futuro do obstáculo, só a parte de lado (a frente continua sendo a rota)
+  let fuga = { x: -futuro.x, y: -futuro.y };
+  const frente = fuga.x * direcao.x + fuga.y * direcao.y;
+  fuga = { x: fuga.x - frente * direcao.x, y: fuga.y - frente * direcao.y };
+  let tamanho = Math.sqrt(fuga.x ** 2 + fuga.y ** 2);
+  if (tamanho < 1e-6) {
+    fuga = { x: -direcao.y, y: direcao.x }; // de frente, bem no meio: vai pela direita (regra do ar)
+    tamanho = 1;
+  }
+
+  // Mistura: um pouco para frente + bastante de lado
+  const movimento = { x: direcao.x * 0.3 + fuga.x / tamanho, y: direcao.y * 0.3 + fuga.y / tamanho };
+  const tamanhoMovimento = Math.sqrt(movimento.x ** 2 + movimento.y ** 2);
+  const passo = passoKm * POTENCIA_MAXIMA;
+  const novo = {
+    x: local.x + (movimento.x / tamanhoMovimento) * passo,
+    y: local.y + (movimento.y / tamanhoMovimento) * passo,
+  };
+
+  const nome = TIPOS_OBSTACULO[ameaca.obstaculo.tipo].nome;
+  return {
+    ...voo,
+    origem: novo, // o trecho recomeça de onde o drone foi parar, rumo ao mesmo alvo
+    km: 0,
+    hodometro: (voo.hodometro || 0) + passo,
+    desviandoObstaculo: true,
+    mensagem: `${nome} a ${Math.round(ameaca.distancia * 1000)} m! Desvio com potência máxima`,
+  };
+}
+
 // ---------- Eventos ----------
 
 // O que o drone faz quando um evento acontece. Recebe o drone no ponto exato do evento.
@@ -605,6 +707,9 @@ function aplicarEvento(voo, evento, regiao) {
 
     case 'falha-grave':
       return abrirParaquedas(voo, local, altitude, regiao, `Falha grave ${onde}!`);
+
+    case 'obstaculo':
+      return null; // o obstáculo já entrou em cena antes (ANTECEDENCIA_KM); quem reage é o desviador
 
     case 'bateria': {
       if (voo.situacao === 'planando') return null; // motores desligados: a bateria não importa mais
@@ -685,6 +790,9 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   // Guarda o ponto de entrega, para retomar a rota depois de um desvio por GPS
   if (voo.destinoFinal === undefined) voo = { ...voo, destinoFinal: voo.destino };
 
+  // O relógio da simulação anda (os obstáculos se movem conforme esse tempo)
+  voo = { ...voo, tempo: (voo.tempo || 0) + segundosDoTique(voo, passoKm) };
+
   // Sem GPS: o tempo passa, o erro da posição cresce e o drone confere se o sinal voltou
   if (voo.semGps) {
     const segundos = segundosDoTique(voo, passoKm);
@@ -731,6 +839,30 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   const total = distanciaKm(voo.origem, voo.destino);
   const hodometro = voo.hodometro || 0;
   const hodometroNovo = hodometro + passo;
+
+  // Obstáculos entram em cena 800 m antes do km do evento (ainda fora do alcance do sensor)
+  const novos = eventos.filter(
+    (e) => e.tipo === 'obstaculo' && hodometro < e.km - ANTECEDENCIA_KM && hodometroNovo >= e.km - ANTECEDENCIA_KM
+  );
+  if (novos.length > 0) {
+    const local = posicaoAtual(voo);
+    const direcao = direcaoDoTrecho(voo);
+    const criados = novos.map((e) => criarObstaculo(e, local, direcao, voo.tempo));
+    voo = { ...voo, obstaculos: [...(voo.obstaculos || []), ...criados] };
+  }
+
+  // Desviador em tempo real (com motor fraco ou de paraquedas não há potência para manobrar)
+  const podeManobrar = voo.situacao !== 'planando' && voo.situacao !== 'motor-fraco';
+  if (podeManobrar && voo.obstaculos && voo.obstaculos.length > 0) {
+    const ameaca = ameacaMaisUrgente(voo);
+    if (ameaca) return desviarDeObstaculo(voo, ameaca, passoKm);
+
+    // O perigo passou: refaz a conta da bateria, porque o desvio gastou mais
+    if (voo.desviandoObstaculo) {
+      const passou = { ...voo, desviandoObstaculo: false };
+      return falhaBateria(passou, posicaoAtual(passou), altitudeDoVoo(passou), regiao, 'Obstáculo para trás.');
+    }
+  }
 
   // Eventos: valem em qualquer fase em que o drone anda, menos planando
   // (de paraquedas, sem motor, não há mais o que uma falha possa piorar).

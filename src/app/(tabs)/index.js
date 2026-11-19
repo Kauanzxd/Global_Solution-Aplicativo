@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Cabecalho from '../../componentes/Cabecalho';
 import Mapa from '../../componentes/Mapa';
 import { AREAS, LOCAIS, VIAS, ZONAS_POUSO } from '../../dados/regiao';
+import { desenhoObstaculo } from '../../regras/obstaculos';
 import { altitudeDoVoo, avancarVoo, estaNoAr, incertezaDoVoo, posicaoNaRota } from '../../regras/voo';
 
 const hub = LOCAIS.find((local) => local.id === 'hub');
@@ -22,8 +23,9 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // Uma segunda temperatura alta, com o drone já quente, vira crítica.
 // Bateria: { tipo: 'bateria', km: 1, perda: 40 } = uma célula falha e a bateria cai 40 pontos
 // (sem "perda", cai 20). Teste com perda 20 (segue), 40 (zona) e 62 (paraquedas).
+// Obstáculo em movimento: { tipo: 'obstaculo', km: 2, objeto: 'passaros' } ou objeto: 'guindaste'
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [{ tipo: 'bateria', km: 1, perda: 40 }];
+const EVENTOS = [{ tipo: 'obstaculo', km: 2, objeto: 'guindaste' }];
 const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
@@ -74,6 +76,7 @@ export default function Simular() {
           paraquedas={paraquedas}
           vento={voo.vento}
           incerteza={incertezaDoVoo(voo)}
+          obstaculos={(voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo))}
         />
       </View>
       <Text style={styles.status}>{voo.mensagem}</Text>

@@ -175,6 +175,48 @@ function IndicadorVento({ vento }) {
   );
 }
 
+// Um obstáculo em movimento: a bolha de segurança tracejada + o desenho do objeto
+function Obstaculo({ obstaculo }) {
+  const x = obstaculo.posicao.x * ESCALA;
+  const y = obstaculo.posicao.y * ESCALA;
+
+  return (
+    <G>
+      <Circle cx={x} cy={y} r={obstaculo.bolhaKm * ESCALA} fill="#D32F2F" fillOpacity="0.1" stroke="#D32F2F" strokeWidth="0.3" strokeDasharray="0.8 0.8" />
+
+      {obstaculo.tipo === 'guindaste' && (
+        <G>
+          {/* Braço: da base até a ponta, girando */}
+          <Line
+            x1={obstaculo.base.x * ESCALA}
+            y1={obstaculo.base.y * ESCALA}
+            x2={obstaculo.ponta.x * ESCALA}
+            y2={obstaculo.ponta.y * ESCALA}
+            stroke="#E0A800"
+            strokeWidth="0.9"
+          />
+          <Rect x={obstaculo.base.x * ESCALA - 1} y={obstaculo.base.y * ESCALA - 1} width="2" height="2" fill="#555555" />
+        </G>
+      )}
+
+      {obstaculo.tipo === 'passaros' && (
+        <G>
+          {/* Três "v" pequenos: o desenho clássico de pássaros voando */}
+          {[[-1.2, -0.6], [0.8, -1], [0, 0.8]].map(([dx, dy]) => (
+            <Path
+              key={`${dx},${dy}`}
+              d={`M ${x + dx - 0.8} ${y + dy - 0.4} L ${x + dx} ${y + dy} L ${x + dx + 0.8} ${y + dy - 0.4}`}
+              stroke="#2B3440"
+              strokeWidth="0.35"
+              fill="none"
+            />
+          ))}
+        </G>
+      )}
+    </G>
+  );
+}
+
 // "destino" é o local para onde o drone vai (um item de LOCAIS)
 // "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
 // "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
@@ -183,7 +225,17 @@ function IndicadorVento({ vento }) {
 // { alcance, confortavel }, cada uma um círculo { centro, raio } em km
 // "vento" (opcional): { x, y, velocidade, de } — aparece como seta no canto
 // "incerteza" (opcional): erro da posição em metros, quando o drone está sem GPS
-export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas, vento, incerteza = 0 }) {
+// "obstaculos" (opcional): lista de obstáculos em movimento para desenhar
+export default function Mapa({
+  destino,
+  drone,
+  desvio,
+  altitude = 0,
+  paraquedas,
+  vento,
+  incerteza = 0,
+  obstaculos = [],
+}) {
   const hub = LOCAIS.find((local) => local.id === 'hub');
   const posicaoDrone = drone || hub;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -323,6 +375,11 @@ export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas,
             strokeDasharray="2 1"
           />
         )}
+
+        {/* Obstáculos em movimento (guindaste, pássaros) */}
+        {obstaculos.map((obstaculo, indice) => (
+          <Obstaculo key={indice} obstaculo={obstaculo} />
+        ))}
 
         {/* 10. Locais: por cima do mapa e da rota */}
         {LOCAIS.map((local) => (
