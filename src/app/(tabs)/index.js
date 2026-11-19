@@ -24,14 +24,18 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // Bateria: { tipo: 'bateria', km: 1, perda: 40 } = uma célula falha e a bateria cai 40 pontos
 // (sem "perda", cai 20). Teste com perda 20 (segue), 40 (zona) e 62 (paraquedas).
 // Obstáculo em movimento: { tipo: 'obstaculo', km: 2, objeto: 'passaros' } ou objeto: 'guindaste'
+// Outro drone da rede vindo de frente: { tipo: 'drone', km: 2.5, prioridade: 'comercial' }
+// (prioridade: orgaos, emergencia, saude ou comercial; opcionais: bateria, id)
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [{ tipo: 'obstaculo', km: 2, objeto: 'guindaste' }];
+const EVENTOS = [{ tipo: 'drone', km: 2.5, prioridade: 'comercial' }];
+const PRIORIDADE = 'saude'; // tipo da nossa missão — no passo 4, quem escolhe é o usuário
 const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
 
-// Zoom: com um obstáculo a até 600 m, o mapa aproxima para mostrar só 1,2 km em volta do drone (8x)
+// Zoom: com um obstáculo a até 1 km, o mapa aproxima para mostrar só 1,2 km em volta do drone (8x).
+// Começa cedo porque dois drones se aproximam rápido (30 m/s somando os dois).
 const VISTA_NORMAL = 100;
 const VISTA_APROXIMADA = 12;
-const RAIO_ZOOM_KM = 0.6;
+const RAIO_ZOOM_KM = 1;
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
@@ -45,6 +49,7 @@ export default function Simular() {
     km: 0,
     altitude: 0,
     bateria: BATERIA_INICIAL,
+    prioridade: PRIORIDADE,
     situacao: 'decolando',
     mensagem: 'Decolando...',
   });

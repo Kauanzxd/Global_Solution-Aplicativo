@@ -28,8 +28,10 @@ import {
   TIPOS_OBSTACULO,
   criarObstaculo,
   medirObstaculo,
+  posicaoObstaculo,
 } from './obstaculos.js';
 import { riscoNoPonto } from './risco.js';
+import { DETECCAO_RADIO_KM, ID_NOSSO_DRONE, PRIORIDADES, quemDesvia } from './trafego.js';
 import {
   ALTITUDE_MINIMA_PARAQUEDAS,
   MARGEM_POUSO_M,
@@ -136,6 +138,7 @@ function continuar(voo) {
     hodometro: voo.hodometro || 0,
     bateria: voo.bateria,
     temperaturaAlta: voo.temperaturaAlta,
+    prioridade: voo.prioridade, // tipo de missão: orgaos, emergencia, saude ou comercial
     tempo: voo.tempo, // relógio da simulação, em segundos
     obstaculos: voo.obstaculos, // obstáculos em movimento já em cena
     destinoFinal: voo.destinoFinal, // o ponto de entrega, para retomar a rota se der
@@ -630,8 +633,13 @@ function ameacaMaisUrgente(voo) {
     const futuro = { x: r.x + v.x * t, y: r.y + v.y * t }; // onde ele estará, visto do drone
     const menorDistancia = Math.sqrt(futuro.x ** 2 + futuro.y ** 2);
 
-    // 3. Vai entrar na bolha nos próximos 60 s? É uma ameaça. Fica com a mais próxima no tempo.
+    // Outro drone com acordo de que ELE desvia: confiamos no combinado e seguimos reto,
+    // mas continuamos vigiando: se ele entrar na nossa bolha, reagimos mesmo assim
     const bolha = TIPOS_OBSTACULO[obstaculo.tipo].bolhaKm;
+    const eleDesvia = obstaculo.tipo === 'drone' && obstaculo.acordo && obstaculo.acordo.desvia !== ID_NOSSO_DRONE;
+    if (eleDesvia && distancia > bolha) continue;
+
+    // 3. Vai entrar na bolha nos próximos 60 s? É uma ameaça. Fica com a mais próxima no tempo.
     if (t <= HORIZONTE_PREVISAO_S && menorDistancia < bolha && (!maisUrgente || t < maisUrgente.t)) {
       maisUrgente = { obstaculo, t, futuro, distancia, direcao };
     }
@@ -649,8 +657,9 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
   const frente = fuga.x * direcao.x + fuga.y * direcao.y;
   fuga = { x: fuga.x - frente * direcao.x, y: fuga.y - frente * direcao.y };
   let tamanho = Math.sqrt(fuga.x ** 2 + fuga.y ** 2);
-  if (tamanho < 1e-6) {
-    fuga = { x: -direcao.y, y: direcao.x }; // de frente, bem no meio: vai pela direita (regra do ar)
+  // De frente, bem no meio, ou outro drone (como combinado): vai pela direita (regra do ar)
+  if (tamanho < 1e-6 || ameaca.obstaculo.tipo === 'drone') {
+    fuga = { x: -direcao.y, y: direcao.x };
     tamanho = 1;
   }
 
@@ -664,13 +673,43 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
   };
 
   const nome = TIPOS_OBSTACULO[ameaca.obstaculo.tipo].nome;
+  const mensagem =
+    ameaca.obstaculo.tipo === 'drone'
+      ? `Desviando pela direita do ${ameaca.obstaculo.id}, como combinado (${Math.round(ameaca.distancia * 1000)} m)`
+      : `${nome} a ${Math.round(ameaca.distancia * 1000)} m! Desvio com potência máxima`;
   return {
     ...voo,
     origem: novo, // o trecho recomeça de onde o drone foi parar, rumo ao mesmo alvo
     km: 0,
     hodometro: (voo.hodometro || 0) + passo,
     desviandoObstaculo: true,
-    mensagem: `${nome} a ${Math.round(ameaca.distancia * 1000)} m! Desvio com potência máxima`,
+    mensagem,
+  };
+}
+
+// ---------- Conversa entre drones ----------
+// Ao se ouvirem pelo rádio (500 m), os dois drones trocam id, prioridade e bateria,
+// e cada um roda a mesma regra (quemDesvia). Como os dados e a regra são iguais,
+// os dois chegam ao mesmo acordo: só um desvia, pela direita; o outro segue reto.
+function negociar(voo, outro) {
+  const nos = { id: ID_NOSSO_DRONE, prioridade: voo.prioridade ?? 'saude', bateria: Math.round(voo.bateria ?? 100) };
+  const dele = { id: outro.id, prioridade: outro.prioridade, bateria: Math.round(outro.bateria) };
+  const desvia = quemDesvia(nos, dele);
+
+  const acordo = { desvia, tempo: voo.tempo };
+  const obstaculos = voo.obstaculos.map((o) => (o === outro ? { ...o, acordo } : o));
+
+  const nomeNos = PRIORIDADES[nos.prioridade].nome;
+  const nomeDele = PRIORIDADES[dele.prioridade].nome;
+  const decisao =
+    desvia === ID_NOSSO_DRONE
+      ? `nós (${nomeNos}, ${nos.bateria}%) desviamos pela direita; ${outro.id} (${nomeDele}) segue reto`
+      : `${outro.id} (${nomeDele}, ${dele.bateria}%) desvia pela direita; nós (${nomeNos}) seguimos reto`;
+
+  return {
+    ...voo,
+    obstaculos,
+    mensagem: `Drone ${outro.id} a ${Math.round(DETECCAO_RADIO_KM * 1000)} m. Conversa pelo rádio... Acordo: ${decisao}`,
   };
 }
 
@@ -709,7 +748,8 @@ function aplicarEvento(voo, evento, regiao) {
       return abrirParaquedas(voo, local, altitude, regiao, `Falha grave ${onde}!`);
 
     case 'obstaculo':
-      return null; // o obstáculo já entrou em cena antes (ANTECEDENCIA_KM); quem reage é o desviador
+    case 'drone':
+      return null; // já entrou em cena antes (ANTECEDENCIA_KM); quem reage é o desviador
 
     case 'bateria': {
       if (voo.situacao === 'planando') return null; // motores desligados: a bateria não importa mais
@@ -842,7 +882,10 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
 
   // Obstáculos entram em cena 800 m antes do km do evento (ainda fora do alcance do sensor)
   const novos = eventos.filter(
-    (e) => e.tipo === 'obstaculo' && hodometro < e.km - ANTECEDENCIA_KM && hodometroNovo >= e.km - ANTECEDENCIA_KM
+    (e) =>
+      (e.tipo === 'obstaculo' || e.tipo === 'drone') &&
+      hodometro < e.km - ANTECEDENCIA_KM &&
+      hodometroNovo >= e.km - ANTECEDENCIA_KM
   );
   if (novos.length > 0) {
     const local = posicaoAtual(voo);
@@ -854,6 +897,17 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   // Desviador em tempo real (com motor fraco ou de paraquedas não há potência para manobrar)
   const podeManobrar = voo.situacao !== 'planando' && voo.situacao !== 'motor-fraco';
   if (podeManobrar && voo.obstaculos && voo.obstaculos.length > 0) {
+    // Outro drone da rede ao alcance do rádio e ainda sem acordo? Conversa primeiro.
+    const local = posicaoAtual(voo);
+    const semAcordo = voo.obstaculos.find(
+      (o) =>
+        o.tipo === 'drone' &&
+        o.comunicacao &&
+        !o.acordo &&
+        distanciaKm(local, posicaoObstaculo(o, voo.tempo)) <= DETECCAO_RADIO_KM
+    );
+    if (semAcordo) return negociar(voo, semAcordo);
+
     const ameaca = ameacaMaisUrgente(voo);
     if (ameaca) return desviarDeObstaculo(voo, ameaca, passoKm);
 

@@ -3,6 +3,7 @@
 //
 // Atenção: as medidas são ESQUEMÁTICAS (maiores que as reais) para o desvio
 // aparecer no mapa de 10 km. Um guindaste real tem uns 60 m de braço.
+import { PRIORIDADES } from './trafego.js';
 
 export const DETECCAO_SENSOR_KM = 0.4; // os sensores (câmera e radar) enxergam a 400 m
 export const ANTECEDENCIA_KM = 0.8; // o obstáculo "entra em cena" 800 m antes, fora do alcance do sensor
@@ -13,6 +14,8 @@ export const TIPOS_OBSTACULO = {
   guindaste: { nome: 'Guindaste', bolhaKm: 0.12, bracoKm: 0.3, distanciaBaseKm: 0.2, velocidadeKmS: 0.004 },
   // O bando cruza a rota de lado, balançando um pouco (pássaros não voam em linha reta)
   passaros: { nome: 'Bando de pássaros', bolhaKm: 0.15, velocidadeKmS: 0.01, balancoKm: 0.06 },
+  // Outro drone da rede, vindo de frente pela mesma rota
+  drone: { nome: 'Drone', bolhaKm: 0.1, velocidadeKmS: 0.015, desvioKm: 0.3, rampaS: 8 },
 };
 
 // Cria o obstáculo à frente do drone, na rota, de um jeito que ele CRUZE o caminho
@@ -22,6 +25,23 @@ export function criarObstaculo(evento, local, direcao, tempoAgora) {
   const pontoNaRota = { x: local.x + direcao.x * ANTECEDENCIA_KM, y: local.y + direcao.y * ANTECEDENCIA_KM };
   const chegada = tempoAgora + ANTECEDENCIA_KM / VELOCIDADE_DRONE_KM_S; // quando o drone chegaria lá
   const lado = { x: -direcao.y, y: direcao.x }; // perpendicular à rota
+
+  // Outro drone: vem de frente pela rota e passa pelo ponto de encontro junto com o nosso
+  if (evento.tipo === 'drone') {
+    const tipo = TIPOS_OBSTACULO.drone;
+    return {
+      tipo: 'drone',
+      id: evento.id ?? 'SADEC-07',
+      prioridade: evento.prioridade ?? 'comercial',
+      bateria: evento.bateria ?? 60,
+      comunicacao: evento.comunicacao !== false,
+      pontoNaRota,
+      velocidade: { x: -direcao.x * tipo.velocidadeKmS, y: -direcao.y * tipo.velocidadeKmS },
+      direita: { x: direcao.y, y: -direcao.x }, // a direita DELE (ele vem no sentido contrário)
+      chegada,
+      acordo: null, // ainda não conversaram
+    };
+  }
 
   if (evento.objeto === 'guindaste') {
     const tipo = TIPOS_OBSTACULO.guindaste;
@@ -46,9 +66,28 @@ export function criarObstaculo(evento, local, direcao, tempoAgora) {
   };
 }
 
+// Quanto o OUTRO drone está desviado para a direita dele (em km), se o acordo
+// disse que é ele quem desvia: vai para o lado aos poucos, passa, e volta para a rota
+function desvioDoOutroDrone(obstaculo, tempo) {
+  if (!obstaculo.acordo || obstaculo.acordo.desvia !== obstaculo.id) return 0;
+  const tipo = TIPOS_OBSTACULO.drone;
+  const indo = (tempo - obstaculo.acordo.tempo) / tipo.rampaS; // 0 → 1 depois do acordo
+  const voltando = (obstaculo.chegada + 15 - tempo) / tipo.rampaS; // 1 → 0 depois de passar
+  const fator = Math.min(Math.max(indo, 0), Math.max(voltando, 0), 1);
+  return tipo.desvioKm * fator;
+}
+
 // Onde o perigo está num instante "tempo"
 export function posicaoObstaculo(obstaculo, tempo) {
   const dt = tempo - obstaculo.chegada; // negativo = antes de cruzar a rota
+
+  if (obstaculo.tipo === 'drone') {
+    const lado = desvioDoOutroDrone(obstaculo, tempo);
+    return {
+      x: obstaculo.pontoNaRota.x + obstaculo.velocidade.x * dt + obstaculo.direita.x * lado,
+      y: obstaculo.pontoNaRota.y + obstaculo.velocidade.y * dt + obstaculo.direita.y * lado,
+    };
+  }
 
   if (obstaculo.tipo === 'guindaste') {
     const tipo = TIPOS_OBSTACULO.guindaste;
@@ -114,6 +153,9 @@ export function desenhoObstaculo(obstaculo, tempo) {
   if (obstaculo.tipo === 'guindaste') {
     desenho.base = obstaculo.base;
     desenho.ponta = pontaDoBraco(obstaculo, tempo);
+  }
+  if (obstaculo.tipo === 'drone') {
+    desenho.rotulo = `${obstaculo.id} · ${PRIORIDADES[obstaculo.prioridade].nome}`;
   }
   return desenho;
 }
