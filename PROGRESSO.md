@@ -30,13 +30,27 @@ Modos por prioridade:
 2. Emergência
 3. Saúde
 4. Comercial
+5. Retorno (drone vazio voltando ao hub: cede a vez a todos)
 
-Regras do drone:
-- Só decola se a bateria cobrir ida + volta com 30% de margem.
-- Níveis 1 e 2 podem pegar um drone de entrega comercial que ainda não
-  decolou; um drone já em voo comercial termina a entrega antes.
-- Pane: desvia para a zona de pouso segura mais próxima.
-- Falha grave: aciona o paraquedas.
+Regras do drone (todas já implementadas, exceto onde indicado):
+- Só decola se a bateria cobrir ida + volta + 4 subidas/descidas com 30% de margem.
+- Decola e pousa na vertical (falha abaixo de 30 m na decolagem = queda dentro do hub).
+- Zonas controladas: as zonas de pouso e o hub. Em emergência, o drone sempre
+  procura uma delas; pontos de entrega (têm gente) só em último caso.
+- Pane: desvia para a zona controlada mais próxima.
+- Falha grave: paraquedas guiável (planeio 3:1), escolhe o ponto pelo risco,
+  prefere chegar com 40 m de margem e desce em espiral.
+- Motor fraco: sistema de risco ("consigo chegar com folga?") a cada tique;
+  "talvez" ou "não" = paraquedas na hora.
+- Sem GPS: afasta-se de vias/bairros, paira e verifica o sinal até bater a
+  reserva de bateria ou 150 m de incerteza; depois vai para uma zona.
+- Dois drones: conversam pelo rádio e rodam a mesma regra (prioridade,
+  bateria, identificação); drone sem rádio = nós desviamos; os dois sem
+  rádio = regra do ar (cada um pela própria direita).
+- Missão completa: ida, entrega no destino, volta ao hub (ou zona, se a
+  bateria não cobrir o hub).
+- (Ainda não implementado) Níveis 1 e 2 podem pegar um drone comercial que
+  ainda não decolou.
 
 Foco do app: **simulações**. Na apresentação (23 a 27/11), os
 professores escaneiam um QR code, montam qualquer cenário (tipo de
@@ -66,28 +80,67 @@ Parte secundária: aba de Pedidos.
   Jaraguá) e ZONAS_POUSO (ZP-01 a ZP-06). Nomes de hospitais são
   genéricos ("de referência"), para não afirmar nomes reais incertos.
 - `src/componentes/Mapa.js`: desenha tudo em SVG (viewBox 100x100,
-  ESCALA = 10), com os componentes internos Rotulo, Local e ZonaPouso.
-  A ferrovia usa miolo tracejado (`tracejado` no ESTILO_VIA).
-- `src/regras/distancia.js`: `distanciaKm` (Pitágoras) e
-  `zonaMaisProxima(ponto, zonas)`.
-- `src/regras/bateria.js`: `CONSUMO_POR_KM = 5`,
-  `MARGEM_SEGURANCA = 0.3`, `bateriaNecessaria` e
-  `verificarDecolagem(origem, destino, bateria)`.
+  ESCALA = 10). Desenha o drone (altitude, sombra, paraquedas, "sem GPS ±X m"),
+  a rota, o desvio, os círculos de alcance do paraquedas, os obstáculos
+  (guindaste em escala de terreno, bando de pássaros, outros drones) e o
+  indicador de vento. Tem ZOOM (`vista`): o terreno aproxima e os símbolos
+  ficam do mesmo tamanho na tela (multiplicados por `s`).
+- `src/app/(tabs)/index.js`: tela Simular com um cenário FIXO (constantes
+  `EVENTOS`, `BATERIA_INICIAL`, `PRIORIDADE`, destino), relógio com
+  `setInterval`, 4 decisões por tique e zoom suave perto de obstáculos.
+- `src/regras/distancia.js`: `distanciaKm` e `zonaMaisProxima`.
+- `src/regras/bateria.js`: consumo por km e por segundo, reserva
+  (`bateriaParaChegar`), entrega + zona, e `verificarDecolagem` (ida + volta
+  + 4 verticais + 30%).
+- `src/regras/risco.js`: ponto no polígono, distância até via, e
+  `riscoNoPonto` (proibido / alto / médio / baixo), com incerteza e pontos a evitar.
+- `src/regras/paraquedas.js`: planeio com vento (Bhaskara), áreas de alcance
+  e `escolherPouso` (aceitável → confortável → menor risco → mais alto).
+- `src/regras/obstaculos.js`: guindaste girando, pássaros, drones (com e sem
+  rádio, comportamentos reto/pairando/errante) e o que o sensor mede.
+- `src/regras/trafego.js`: prioridades e `quemDesvia` (consenso por regra).
+- `src/regras/voo.js`: o coração da simulação (`avancarVoo`): fases, etapas
+  ida/volta, hodômetro, todos os eventos (pane, falha grave, motor, GPS,
+  vento, bateria, temperatura, obstáculo, drone), desviador em tempo real
+  com histerese, bateria em voo e verificação antes da decolagem.
 - Nos arquivos de `src/regras/`, os imports usam `.js` no final, para
   dar para testar com Node:
   `node --no-warnings --input-type=module -e "import ..."`
 
+### Formato dos eventos (o que a tela do passo 4 vai produzir)
+- `{ tipo: 'pane' | 'falha-grave' | 'motor', km }` (km 0 = na decolagem;
+  `altitude` opcional para a decolagem)
+- `{ tipo: 'gps', km, duracao? }` (sem duração = o sinal não volta)
+- `{ tipo: 'vento', km, velocidade (m/s), de: 'norte' | 'sul' | ... }`
+- `{ tipo: 'bateria', km, perda? }`, `{ tipo: 'temperatura', km, grau?: 'critica' }`
+- `{ tipo: 'obstaculo', km, objeto: 'guindaste' | 'passaros' }`
+- `{ tipo: 'drone', km, prioridade?, comunicacao?, comportamento?, semGps?, ambosSemRadio? }`
+- `{ ..., durante: 'gps' }` no lugar do km = acontece 10 s depois da perda do GPS
+- O km é o do hodômetro (viagem inteira): a ida até a Aldeia tem 4,2 km;
+  km maiores acontecem na volta.
+
 ## Próximos passos (nesta ordem)
 
-1. Drone parado no mapa + linha da rota do hub até o destino.
-2. Voo animado do drone.
-3. Eventos durante o voo (pane, paraquedas etc.).
-4. Tela para montar a simulação.
-5. Cenários prontos + resumo do voo.
-6. Safe area e legenda do mapa.
+Passos 1, 2 e 3 (drone no mapa, voo animado, eventos) estão PRONTOS.
+A apresentação é de 23 a 27/11: priorizar o que os professores vão usar.
+
+4. Tela para montar a simulação: tipo de entrega (prioridade), destino,
+   bateria (bloqueando a decolagem sem bateria e mostrando o motivo),
+   lista de eventos com km, botões Simular e Reiniciar. Hoje o cenário é
+   fixo no `index.js`.
+5. Cenários prontos (ex.: "Pane sobre a rodovia", "Dois drones",
+   "GPS perdido") + resumo do voo no fim (distância, bateria, eventos,
+   onde pousou).
+6. Safe area e legenda do mapa (o que é cada cor/ícone).
 7. Aba Pedidos.
 8. Publicar: APK pelo EAS Build + Expo Go/EAS Update com QR code.
 9. README com prints.
+
+Pendências menores:
+- Níveis 1 e 2 pegando um drone comercial que ainda não decolou (regra do
+  projeto ainda não implementada).
+- Lint não configurado (`npx expo lint` instalaria pacotes).
+- Confirmar os nomes reais dos hospitais da região (hoje genéricos).
 
 ## Para testar
 
@@ -130,3 +183,24 @@ Expo Go, na mesma rede Wi-Fi.
   `tracejado`); `strokeDasharray` no SVG.
 - **Onde paramos:** mapa novo pronto e testado (web + regras no Node).
   Próximo é o passo 1: drone parado no mapa + linha da rota.
+
+### 18–19/11/2026 — Voo, eventos e regras de segurança (passos 1 a 3)
+- **Feito:** drone e rota no mapa; voo animado; altitude com sombra;
+  decolagem e pouso verticais; todos os eventos (pane, falha grave com
+  paraquedas guiável, motor fraco com sistema de risco, GPS com espera
+  inteligente e incerteza, vento, bateria, temperatura, obstáculos em
+  movimento, drones cooperativos e sem rádio); mapa de risco; bateria em
+  voo; segunda falha em qualquer fase (hodômetro); zoom no mapa; missão
+  completa com ida, entrega e volta; hub como zona controlada; pontos de
+  entrega evitados; decolagem negada sem bateria; dois drones vazios.
+- **Conceitos:** useState/useEffect/setInterval; interpolação linear;
+  ponto no polígono (raio); distância até segmento (projeção); vetores e
+  vetor unitário; trigonometria (cos/sen); Bhaskara no tempo de planeio;
+  ponto de maior aproximação; histerese; consenso por regra determinística;
+  refatoração (funções genéricas como `abrirParaquedas`, `desviarParaZona`,
+  `bateriaParaTerminar`, `continuar`); testes no Node revelando bugs reais
+  (ZP-05 perto do trilho, reserva sem a descida, 0 ÷ 0, desvio "raspando").
+- **Onde paramos:** passos 1–3 completos. Últimas mudanças (subir para
+  planar do ponto de entrega e dois drones vazios) em `voo.js` e
+  `trafego.js`, ainda não commitadas. Próximo: passo 4, a tela de montar
+  a simulação.

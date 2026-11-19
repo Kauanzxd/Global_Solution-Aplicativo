@@ -42,10 +42,12 @@ export function bateriaParaEntregarEIrAZona(distanciaAteDestino, distanciaDestin
 }
 
 // Antes de decolar: a bateria aguenta ir até o destino E voltar para a base, com margem?
+// Conta também as 4 subidas/descidas na vertical: sobe no hub, desce na entrega,
+// sobe de novo e desce no hub (3% cada).
 // Devolve a decisão (pode) e os números que levaram a ela, para mostrar na tela.
 export function verificarDecolagem(origem, destino, bateriaAtual) {
   const distanciaTotal = distanciaKm(origem, destino) * 2; // ida + volta
-  const necessaria = bateriaNecessaria(distanciaTotal);
+  const necessaria = bateriaNecessaria(distanciaTotal) + BATERIA_POUSO_VERTICAL * 4;
   const necessariaComMargem = necessaria * (1 + MARGEM_SEGURANCA);
 
   return {

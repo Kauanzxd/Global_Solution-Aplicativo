@@ -7,7 +7,8 @@ import { algumObstaculoPerto, desenhoObstaculo } from '../../regras/obstaculos';
 import { altitudeDoVoo, avancarVoo, estaNoAr, incertezaDoVoo, posicaoNaRota } from '../../regras/voo';
 
 const hub = LOCAIS.find((local) => local.id === 'hub');
-const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
+// "locais": os pontos de entrega (têm gente em volta): numa emergência, o drone evita descer perto deles
+const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS, locais: LOCAIS.filter((local) => local.id !== 'hub') };
 
 // Por enquanto o cenário é fixo. No passo 4, quem monta é o usuário.
 // Outros testes: [{ tipo: 'pane', km: 1.5 }], [{ tipo: 'falha-grave', km: 0 }] ou
@@ -29,7 +30,9 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
 // Drone SEM rádio: { tipo: 'drone', km: 2.5, comunicacao: false, comportamento: 'errante' }
 // (comportamento: 'reto', 'pairando' ou 'errante'; opcionais: semGps: true, ambosSemRadio: true)
-const EVENTOS = [{ tipo: 'drone', km: 2.5, comunicacao: false, comportamento: 'errante', semGps: true }];
+// A missão tem ida e volta: a ida tem 4,2 km; km acima disso acontece na VOLTA ao hub.
+// Ex.: { tipo: 'drone', km: 6, prioridade: 'comercial' } = na volta, vazio, o nosso drone cede a vez
+const EVENTOS = [{ tipo: 'drone', km: 6, prioridade: 'comercial' }];
 const PRIORIDADE = 'saude'; // tipo da nossa missão — no passo 4, quem escolhe é o usuário
 const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
 

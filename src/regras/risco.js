@@ -6,6 +6,10 @@ import { distanciaKm } from './distancia.js';
 // Faixa de segurança de cada lado de rodovias, Rodoanel e trilhos
 export const DISTANCIA_SEGURA_VIA_KM = 0.15; // 150 m
 
+// Pontos de entrega (hospitais, UBSs, comunidades) têm gente em volta: numa emergência,
+// o drone evita descer a menos de 150 m deles (só se não houver outra opção)
+export const DISTANCIA_SEGURA_LOCAL_KM = 0.15;
+
 // O ponto está dentro do polígono? Técnica do "raio":
 // imagine uma linha saindo do ponto para a direita, até o infinito.
 // Contamos quantas bordas do polígono ela cruza: ímpar = dentro, par = fora.
@@ -71,13 +75,18 @@ export function distanciaAtePoligono(ponto, pontos) {
 //
 // "incertezaKm" (opcional): o quanto o drone pode estar errado sobre onde está
 // (sem GPS). Na dúvida, ele se protege: as faixas de segurança aumentam nesse tanto.
-export function riscoNoPonto(ponto, areas, vias, incertezaKm = 0) {
+// "evitar" (opcional): pontos com gente (os locais de entrega), risco alto por perto.
+export function riscoNoPonto(ponto, areas, vias, incertezaKm = 0, evitar = []) {
   const faixa = DISTANCIA_SEGURA_VIA_KM + incertezaKm;
   const viasPerto = vias.filter((via) => distanciaAteVia(ponto, via) <= faixa);
 
   // As vias vêm primeiro: perto de uma via movimentada, nada mais importa
   if (viasPerto.some((via) => via.tipo !== 'estrada')) return 'proibido';
   if (viasPerto.length > 0) return 'alto';
+
+  // Perto de um ponto de entrega (hospital, UBS, comunidade): tem gente, risco alto
+  const pertoDeLocal = evitar.some((local) => distanciaKm(ponto, local) <= DISTANCIA_SEGURA_LOCAL_KM + incertezaKm);
+  if (pertoDeLocal) return 'alto';
 
   const area = areas.find((a) => pontoNoPoligono(ponto, a.pontos));
   if (area && area.tipo === 'urbano') return 'alto';

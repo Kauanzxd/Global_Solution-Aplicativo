@@ -8,18 +8,24 @@
 //   'sem-gps'      parado no ar, tentando recuperar o sinal de GPS
 //   'planando'     de paraquedas, planando até o ponto escolhido
 //   'descendo'     desce na vertical (com motor, ou de paraquedas em espiral)
-// Fases finais (no chão): 'entregue', 'pouso-emergencia', 'pouso-paraquedas',
-// 'pousou-hub' e 'queda'.
+//   'entregando'   pousado no ponto de entrega, deixando a carga (depois decola de volta)
+// Fases finais (no chão): 'missao-concluida' (voltou ao hub), 'pouso-emergencia',
+// 'pouso-paraquedas', 'pousou-hub', 'aguardando-resgate' e 'queda'.
+//
+// Etapas da missão (voo.etapa): 'ida' (hub → ponto de entrega) e 'volta' (de volta ao hub).
 //
 // Eventos acontecem no "km da viagem", contado pelo HODÔMETRO: a distância total
 // voada desde o hub, somando todos os trechos (como o odômetro de um carro).
 // Assim, uma segunda falha pode acontecer no meio de um desvio de emergência.
 import {
+  BATERIA_POUSO_VERTICAL,
   CONSUMO_POR_KM,
   CONSUMO_POR_SEGUNDO,
+  MARGEM_SEGURANCA,
   VELOCIDADE_CRUZEIRO_KM_S,
   bateriaParaChegar,
   bateriaParaEntregarEIrAZona,
+  verificarDecolagem,
 } from './bateria.js';
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
 import {
@@ -32,7 +38,7 @@ import {
   posicaoObstaculo,
 } from './obstaculos.js';
 import { riscoNoPonto } from './risco.js';
-import { DETECCAO_RADIO_KM, ID_NOSSO_DRONE, PRIORIDADES, quemDesvia } from './trafego.js';
+import { DETECCAO_RADIO_KM, ID_NOSSO_DRONE, PRIORIDADES, explicarCriterio, quemDesvia } from './trafego.js';
 import {
   ALTITUDE_MINIMA_PARAQUEDAS,
   MARGEM_POUSO_M,
@@ -78,6 +84,7 @@ const DISTANCIA_MAXIMA_CRITICA_KM = 1; // em temperatura crítica, só vai a uma
 const POTENCIA_MAXIMA = 1.5; // no desvio, anda 1,5 vez mais rápido
 const CONSUMO_DESVIO = 2; // e gasta o dobro por segundo
 const HORIZONTE_PREVISAO_S = 60; // só se preocupa com aproximações nos próximos 60 s
+const DISTANCIA_SAI_DE_CENA_KM = 1; // depois de passar, o obstáculo some do mapa a 1 km
 const FOLGA_IMPREVISIVEL_KM = 0.1; // com um drone que muda de rumo, 100 m a mais de margem
 // Histerese: para COMEÇAR a desviar, basta a previsão entrar na bolha; para PARAR,
 // a previsão precisa ficar 50% além da bolha. Sem isso, o drone "raspa" na borda
@@ -99,7 +106,24 @@ function fatorDoPasso(passoKm) {
   return passoKm / PASSO_REFERENCIA_KM;
 }
 
-const NO_AR = ['decolando', 'voando', 'afastando', 'desviando', 'motor-fraco', 'sem-gps', 'planando', 'descendo'];
+// Entrega: quanto tempo o drone fica pousado no destino deixando a carga
+const SEGUNDOS_ENTREGA = 30;
+// Para subir e planar de paraquedas, precisa chegar a pelo menos 60 m (o paraquedas
+// precisa de 30 m para abrir, e o resto vira alcance do planeio)
+const ALTITUDE_MINIMA_SUBIR_PARA_PLANAR = 60;
+
+// Fases em que a missão ainda está acontecendo (inclui a parada para entregar)
+const NO_AR = [
+  'decolando',
+  'voando',
+  'afastando',
+  'desviando',
+  'motor-fraco',
+  'sem-gps',
+  'planando',
+  'descendo',
+  'entregando',
+];
 
 export function estaNoAr(voo) {
   return NO_AR.includes(voo.situacao);
@@ -107,7 +131,7 @@ export function estaNoAr(voo) {
 
 // Altitude do drone, em metros
 export function altitudeDoVoo(voo) {
-  if (!estaNoAr(voo)) return 0;
+  if (!estaNoAr(voo) || voo.situacao === 'entregando') return 0;
 
   // Na vertical, a altitude fica guardada no próprio voo
   if (voo.situacao === 'decolando' || voo.situacao === 'descendo') return Math.round(voo.altitude);
@@ -140,6 +164,18 @@ export function posicaoNaRota(origem, destino, kmVoados) {
   };
 }
 
+// Nome de uma zona com o artigo certo: "a ZP-02" ou "o hub" (o hub é masculino).
+// forma: 'a' (para a ZP-02 / para o hub), 'à' (à ZP-02 / ao hub), 'na' (na ZP-02 / no hub)
+function comArtigo(zona, forma) {
+  if (zona.ehHub) return { a: 'o hub', à: 'ao hub', na: 'no hub' }[forma];
+  return { a: `a ${zona.id}`, à: `à ${zona.id}`, na: `na ${zona.id}` }[forma];
+}
+
+// Primeira letra maiúscula (para começar uma frase com o nome da zona)
+function maiuscula(texto) {
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
 // Onde o drone está agora
 function posicaoAtual(voo) {
   return posicaoNaRota(voo.origem, voo.destino, voo.km);
@@ -156,7 +192,9 @@ function continuar(voo) {
     prioridade: voo.prioridade, // tipo de missão: orgaos, emergencia, saude ou comercial
     tempo: voo.tempo, // relógio da simulação, em segundos
     obstaculos: voo.obstaculos, // obstáculos em movimento já em cena
-    destinoFinal: voo.destinoFinal, // o ponto de entrega, para retomar a rota se der
+    etapa: voo.etapa, // 'ida' ou 'volta'
+    hub: voo.hub, // de onde o drone saiu (e para onde volta)
+    destinoFinal: voo.destinoFinal, // o alvo da etapa: ponto de entrega na ida, hub na volta
     // GPS
     semGps: voo.semGps,
     incerteza: voo.incerteza,
@@ -167,15 +205,17 @@ function continuar(voo) {
 
 // Quantos segundos de verdade este tique representa
 function segundosDoTique(voo, passoKm) {
-  if (voo.situacao === 'decolando' || voo.situacao === 'descendo') return SEGUNDOS_TIQUE_VERTICAL * fatorDoPasso(passoKm);
+  const parado = voo.situacao === 'decolando' || voo.situacao === 'descendo' || voo.situacao === 'entregando';
+  if (parado) return SEGUNDOS_TIQUE_VERTICAL * fatorDoPasso(passoKm);
   if (voo.situacao === 'sem-gps') return SEGUNDOS_TIQUE_PAIRANDO * fatorDoPasso(passoKm);
   return passoKm / VELOCIDADE_CRUZEIRO_KM_S; // andando: o tempo de voar o pedaço (≈ 3,3 s)
 }
 
 // Quanto de bateria (%) o drone gasta neste tique
 function consumoDoTique(voo, passoKm) {
-  // De paraquedas, os motores estão desligados: não gasta nada
-  if (voo.situacao === 'planando' || (voo.situacao === 'descendo' && voo.paraquedasAberto)) return 0;
+  // De paraquedas ou pousado entregando, os motores estão desligados: não gasta nada
+  if (voo.situacao === 'planando' || voo.situacao === 'entregando') return 0;
+  if (voo.situacao === 'descendo' && voo.paraquedasAberto) return 0;
   let extra = voo.temperaturaAlta ? CONSUMO_TEMPERATURA_ALTA : 1; // bateria quente rende menos
   if (voo.desviandoObstaculo) extra *= CONSUMO_DESVIO; // potência máxima no desvio
   return CONSUMO_POR_SEGUNDO * segundosDoTique(voo, passoKm) * extra;
@@ -222,13 +262,22 @@ function descer(voo, passoKm) {
 // Decolagem vertical: o drone sobe em cima do hub e só sai do lugar a 120 m.
 // Eventos no km 0 acontecem durante a decolagem, na altitude do evento
 // (ex.: { tipo: 'falha-grave', km: 0, altitude: 20 }) ou a 60 m.
-function decolar(voo, eventos, passoKm) {
+function decolar(voo, eventos, passoKm, regiao) {
   const altitude = Math.min(voo.altitude + VERTICAL_POR_PASSO_M * fatorDoPasso(passoKm), ALTITUDE_CRUZEIRO);
 
-  // O vento não é um problema na decolagem: ele só passa a valer quando o drone começa a andar
+  // Subindo só para planar (sem bateria para voar até uma zona): no topo, abre o paraquedas
+  if (voo.subirParaPlanar && altitude >= voo.alvoAltitude) {
+    const subiu = { ...voo, altitude };
+    const motivo = `Sem bateria para voar até uma zona: subiu a ${Math.round(altitude)} m e desligou os motores.`;
+    return abrirParaquedas(subiu, posicaoAtual(subiu), altitude, regiao, motivo);
+  }
+
+  // O vento não é um problema na decolagem: ele só passa a valer quando o drone começa a andar.
+  // Eventos no km 0 são da decolagem no HUB (na ida); a decolagem de volta não tem km 0.
+  const naIda = voo.etapa !== 'volta';
   const evento = eventos.find((e) => {
     const altitudeDoEvento = e.altitude ?? ALTITUDE_EVENTO_DECOLAGEM;
-    return e.km === 0 && e.tipo !== 'vento' && voo.altitude < altitudeDoEvento && altitude >= altitudeDoEvento;
+    return naIda && e.km === 0 && e.tipo !== 'vento' && voo.altitude < altitudeDoEvento && altitude >= altitudeDoEvento;
   });
 
   // Falha grave baixa demais para o paraquedas: o drone cai, mas dentro do hub,
@@ -259,12 +308,112 @@ function decolar(voo, eventos, passoKm) {
 
   if (altitude === ALTITUDE_CRUZEIRO) {
     // Chegou a 120 m: começa a andar. Se houver vento no km 0, ele começa a valer agora.
-    const ventoNoKm0 = eventos.find((e) => e.km === 0 && e.tipo === 'vento');
+    const ventoNoKm0 = naIda ? eventos.find((e) => e.km === 0 && e.tipo === 'vento') : undefined;
     const vento = ventoNoKm0 ? criarVento(ventoNoKm0) : voo.vento;
-    const mensagem = ventoNoKm0 ? textoVento(vento) : 'Voando...';
-    return { ...voo, altitude, situacao: 'voando', hodometro: 0, vento, mensagem };
+    let mensagem = naIda ? 'Voando...' : 'Voltando para o hub...';
+    if (ventoNoKm0) mensagem = textoVento(vento);
+    // O hodômetro conta a viagem inteira: na volta, continua de onde parou
+    return { ...voo, altitude, situacao: 'voando', hodometro: voo.hodometro ?? 0, vento, mensagem };
   }
   return { ...voo, altitude };
+}
+
+// ---------- Entrega e volta ----------
+
+// Bateria para sair do ponto de entrega e chegar a uma zona controlada:
+// subir de novo (3%) + voar até lá + descer, tudo com a margem
+function bateriaParaSairEChegar(distancia) {
+  return bateriaParaChegar(distancia) + BATERIA_POUSO_VERTICAL * (1 + MARGEM_SEGURANCA);
+}
+
+// Pousado no ponto de entrega: espera o tempo da entrega e então decide para onde ir.
+// O drone NÃO fica no ponto de entrega: ele precisa terminar numa zona controlada.
+//   1. bateria para voltar ao hub? Volta.
+//   2. senão: vai para a zona controlada mais perto que a bateria alcança com margem.
+//   3. só se não alcançar nenhuma (não consegue voar com segurança) ele fica ali.
+function entregar(voo, passoKm, regiao) {
+  const segundos = (voo.segundosEntregando || 0) + segundosDoTique(voo, passoKm);
+  if (segundos < SEGUNDOS_ENTREGA) return { ...voo, segundosEntregando: segundos };
+
+  const local = posicaoAtual(voo);
+  const tem = voo.bateria ?? 100;
+  const hub = regiao.zonas.find((zona) => zona.ehHub);
+
+  // Para onde vai: o hub, se der; senão, a zona mais perto que dá para alcançar
+  let alvo = null;
+  if (tem >= bateriaParaSairEChegar(distanciaKm(local, hub))) {
+    alvo = hub;
+  } else {
+    const alcancaveis = regiao.zonas
+      .filter((zona) => tem >= bateriaParaSairEChegar(distanciaKm(local, zona)))
+      .sort((a, b) => distanciaKm(local, a) - distanciaKm(local, b));
+    alvo = alcancaveis[0] || null;
+  }
+
+  // 3. Nenhuma zona ao alcance voando. Se der para SUBIR, sobe o quanto a bateria deixar,
+  //    abre o paraquedas e plana para longe do ponto de entrega (que tem gente em volta),
+  //    escolhendo uma zona de pouso se ela estiver ao alcance do planeio.
+  if (!alvo) {
+    // Altura que a bateria consegue subir (3% para 120 m), guardando 10% dela de reserva
+    const altitudePossivel = Math.min(ALTITUDE_CRUZEIRO, (tem / BATERIA_POUSO_VERTICAL) * ALTITUDE_CRUZEIRO * 0.9);
+    if (altitudePossivel >= ALTITUDE_MINIMA_SUBIR_PARA_PLANAR) {
+      const alvoAltitude = Math.floor(altitudePossivel);
+      return {
+        ...continuar(voo),
+        origem: local,
+        destino: local,
+        km: 0,
+        altitude: 0,
+        etapa: 'volta',
+        prioridade: 'retorno',
+        situacao: 'decolando',
+        subirParaPlanar: true,
+        alvoAltitude,
+        mensagem: `Entrega feita, mas a bateria (${Math.round(tem)}%) não alcança nenhuma zona voando. Subindo a ${alvoAltitude} m para planar de paraquedas`,
+      };
+    }
+
+    // Último caso: nem subir dá
+    return {
+      ...voo,
+      situacao: 'aguardando-resgate',
+      mensagem: `Entrega feita, mas a bateria (${Math.round(tem)}%) não dá nem para subir com segurança. O drone fica no ponto de entrega aguardando resgate`,
+    };
+  }
+
+  const mensagem = alvo.ehHub
+    ? 'Entrega feita! Decolando de volta para o hub'
+    : `Entrega feita! A bateria não cobre a volta ao hub: indo para ${comArtigo(alvo, 'a')}`;
+
+  // Decola: o alvo da etapa passa a ser o hub (ou a zona), e a prioridade cai (está vazio)
+  return {
+    ...continuar(voo),
+    origem: local,
+    destino: alvo,
+    destinoFinal: alvo,
+    km: 0,
+    altitude: 0,
+    etapa: 'volta',
+    prioridade: 'retorno',
+    situacao: 'decolando',
+    mensagem,
+  };
+}
+
+// O que falta para terminar a etapa, e quanto de bateria isso exige (já com a margem).
+// Na ida: entregar e depois ainda chegar a uma zona de pouso. Na volta: chegar ao hub.
+function bateriaParaTerminar(voo, local, regiao) {
+  if (voo.etapa === 'volta') {
+    const alvo = voo.destinoFinal; // o hub, ou a zona escolhida depois da entrega
+    const oQue = alvo.ehHub ? 'a volta ao hub' : `a ida ${comArtigo(alvo, 'à')}`;
+    return { precisa: bateriaParaChegar(distanciaKm(local, alvo)), oQue };
+  }
+  const destino = voo.destinoFinal;
+  const zonaDepois = zonaMaisProxima(destino, regiao.zonas); // a zona mais perto do ponto de entrega
+  return {
+    precisa: bateriaParaEntregarEIrAZona(distanciaKm(local, destino), zonaDepois.distancia),
+    oQue: 'a entrega',
+  };
 }
 
 // ---------- Reações de emergência ----------
@@ -288,7 +437,16 @@ function abrirParaquedas(voo, local, altitude, regiao, motivo) {
 
   const vento = voo.vento || SEM_VENTO;
   const incerteza = incertezaDoVoo(voo);
-  const pouso = escolherPouso(local, altitude, regiao.zonas, regiao.areas, regiao.vias, vento, incerteza / 1000);
+  const pouso = escolherPouso(
+    local,
+    altitude,
+    regiao.zonas,
+    regiao.areas,
+    regiao.vias,
+    vento,
+    incerteza / 1000,
+    regiao.locais || [] // pontos de entrega: só desce perto deles se não houver outra opção
+  );
 
   // Sem GPS, avisa que as margens foram ampliadas
   const aviso = incerteza > 0 ? ` Posição incerta (±${Math.round(incerteza)} m): margens ampliadas.` : '';
@@ -320,7 +478,7 @@ function desviarParaZona(voo, local, regiao, motivo) {
     km: 0,
     situacao: 'desviando',
     emergencia: true,
-    mensagem: `${motivo} Desviando para a ${zona.id}`,
+    mensagem: `${motivo} Desviando para ${comArtigo(zona, 'a')}`,
   };
 }
 
@@ -349,7 +507,7 @@ function seguirComMotorFraco(voo, local, altitude, zona, regiao, motivo) {
   const prevista = chegadaPrevista(local, altitude, zona, voo.vento || SEM_VENTO);
 
   if (respostaChegada(prevista) !== 'sim') {
-    return abrirParaquedas(voo, local, altitude, regiao, `${motivo} Chegada à ${zona.id} arriscada.`);
+    return abrirParaquedas(voo, local, altitude, regiao, `${motivo} Chegada ${comArtigo(zona, 'à')} arriscada.`);
   }
 
   return {
@@ -361,7 +519,7 @@ function seguirComMotorFraco(voo, local, altitude, zona, regiao, motivo) {
     emergencia: true,
     altitudeInicial: altitude,
     perdaPorKm: (altitude - prevista) / distanciaKm(local, zona), // já com o vento
-    mensagem: `${motivo} Rumo à ${zona.id}, chegada prevista: ${Math.round(prevista)} m`,
+    mensagem: `${motivo} Rumo ${comArtigo(zona, 'à')}, chegada prevista: ${Math.round(prevista)} m`,
   };
 }
 
@@ -394,7 +552,7 @@ function falhaMotor(voo, local, altitude, regiao, motivo) {
 
 // Dá para parar no ar aqui? Só se não estiver sobre via ou bairro (contando a incerteza)
 function seguroParaPairar(ponto, incertezaKm, regiao) {
-  const risco = riscoNoPonto(ponto, regiao.areas, regiao.vias, incertezaKm);
+  const risco = riscoNoPonto(ponto, regiao.areas, regiao.vias, incertezaKm, regiao.locais || []);
   return risco === 'medio' || risco === 'baixo';
 }
 
@@ -443,7 +601,7 @@ function perderGps(voo, evento, regiao) {
   const alvo = vaiParaDestino
     ? posicaoNaRota(local, destino, ateSeguroDestino)
     : posicaoNaRota(local, zona, ateSeguroZona);
-  const rumo = vaiParaDestino ? 'em direção ao destino' : `em direção à ${zona.id}`;
+  const rumo = vaiParaDestino ? 'em direção ao destino' : `em direção ${comArtigo(zona, 'à')}`;
 
   return {
     ...continuar(semSinal),
@@ -467,13 +625,12 @@ function recuperarGps(voo, regiao) {
 
   const local = posicaoAtual(voo);
   const destino = voo.destinoFinal;
-  const zonaDepois = zonaMaisProxima(destino, regiao.zonas); // a zona mais perto do ponto de entrega
-  const precisa = bateriaParaEntregarEIrAZona(distanciaKm(local, destino), zonaDepois.distancia);
+  const { precisa, oQue } = bateriaParaTerminar(voo, local, regiao);
   const tem = voo.bateria ?? 100;
 
   if (tem < precisa) {
-    const motivo = `Sinal voltou, mas a bateria (${Math.round(tem)}%) não cobre entrega + zona de pouso (${Math.round(precisa)}%).`;
-    if (voo.situacao === 'desviando') return { ...limpo, mensagem: `${motivo} Seguindo para a ${voo.destino.id}` };
+    const motivo = `Sinal voltou, mas a bateria (${Math.round(tem)}%) não cobre ${oQue} com margem (${Math.round(precisa)}%).`;
+    if (voo.situacao === 'desviando') return { ...limpo, mensagem: `${motivo} Seguindo para ${comArtigo(voo.destino, 'a')}` };
     return desviarParaZona(limpo, local, regiao, motivo);
   }
 
@@ -483,7 +640,7 @@ function recuperarGps(voo, regiao) {
     destino,
     km: 0,
     situacao: 'voando',
-    mensagem: 'Sinal de GPS recuperado! Retomando a entrega',
+    mensagem: `Sinal de GPS recuperado! Retomando ${oQue}`,
   };
 }
 
@@ -498,14 +655,14 @@ function pairarSemGps(voo, regiao) {
 
   if (naReserva || perdido) {
     const motivo = naReserva
-      ? `GPS não voltou e a bateria chegou à reserva para a ${zona.id}.`
+      ? `GPS não voltou e a bateria chegou à reserva para ${comArtigo(zona, 'a')}.`
       : `GPS não voltou e a posição ficou incerta demais (±${Math.round(voo.incerteza)} m).`;
     return { ...desviarParaZona(voo, local, regiao, `${motivo} Navegação de reserva:`), desvioPorGps: true };
   }
 
   return {
     ...voo,
-    mensagem: `Sem GPS, parado em local seguro, verificando o sinal (reserva para a ${zona.id}: ${Math.round(reserva)}%)`,
+    mensagem: `Sem GPS, parado em local seguro, verificando o sinal (reserva para ${comArtigo(zona, 'a')}: ${Math.round(reserva)}%)`,
   };
 }
 
@@ -522,10 +679,8 @@ function temperaturaAlta(voo, local, regiao, motivo) {
     return { ...quente, mensagem: `${motivo} Velocidade reduzida para esfriar` }; // já em emergência
   }
 
-  const destino = voo.destinoFinal;
-  const zonaDepois = zonaMaisProxima(destino, regiao.zonas);
-  const precisa =
-    bateriaParaEntregarEIrAZona(distanciaKm(local, destino), zonaDepois.distancia) * FATOR_KM_TEMPERATURA_ALTA;
+  const terminar = bateriaParaTerminar(voo, local, regiao);
+  const precisa = terminar.precisa * FATOR_KM_TEMPERATURA_ALTA;
   const tem = voo.bateria ?? 100;
 
   if (tem < precisa) {
@@ -533,10 +688,10 @@ function temperaturaAlta(voo, local, regiao, motivo) {
       quente,
       local,
       regiao,
-      `${motivo} Mais devagar e gastando mais, a bateria (${Math.round(tem)}%) não cobre a entrega (${Math.round(precisa)}%).`
+      `${motivo} Mais devagar e gastando mais, a bateria (${Math.round(tem)}%) não cobre ${terminar.oQue} (${Math.round(precisa)}%).`
     );
   }
-  return { ...quente, mensagem: `${motivo} Velocidade reduzida para esfriar, entrega mantida` };
+  return { ...quente, mensagem: `${motivo} Velocidade reduzida para esfriar, ${terminar.oQue} continua` };
 }
 
 // Temperatura crítica: risco de incêndio. Pousa o quanto antes, num lugar sem gente:
@@ -562,7 +717,7 @@ function temperaturaCritica(voo, local, regiao, motivo) {
     km: 0,
     situacao: 'desviando',
     emergencia: true,
-    mensagem: `${motivo} A ${zona.id} está longe: pouso imediato na área segura mais próxima`,
+    mensagem: `${motivo} ${maiuscula(comArtigo(zona, 'a'))} está longe: pouso imediato na área segura mais próxima`,
   };
 }
 
@@ -578,13 +733,12 @@ function falhaBateria(voo, local, altitude, regiao, motivo) {
   const tem = voo.bateria;
   const fator = voo.temperaturaAlta ? FATOR_KM_TEMPERATURA_ALTA : 1; // quente, gasta mais por km
 
-  // 1. Em voo normal: ainda dá para fazer a entrega?
+  // 1. Em voo normal: ainda dá para terminar a etapa (a entrega, ou a volta ao hub)?
+  const terminar = bateriaParaTerminar(voo, local, regiao);
   if (voo.situacao === 'voando') {
-    const destino = voo.destinoFinal;
-    const zonaDepois = zonaMaisProxima(destino, regiao.zonas);
-    const precisa = bateriaParaEntregarEIrAZona(distanciaKm(local, destino), zonaDepois.distancia) * fator;
+    const precisa = terminar.precisa * fator;
     if (tem >= precisa) {
-      return { ...voo, mensagem: `${motivo} Ainda cobre a entrega (tem ${Math.round(tem)}%, precisa ${Math.round(precisa)}%)` };
+      return { ...voo, mensagem: `${motivo} Ainda cobre ${terminar.oQue} (tem ${Math.round(tem)}%, precisa ${Math.round(precisa)}%)` };
     }
   }
 
@@ -598,8 +752,8 @@ function falhaBateria(voo, local, altitude, regiao, motivo) {
     : zonaMaisProxima(local, regiao.zonas);
 
   if (tem >= bateriaParaChegar(alvo.distancia) * fator) {
-    if (jaIndoParaZona) return { ...voo, mensagem: `${motivo} Ainda chega à ${alvo.zona.id} com margem` };
-    return desviarParaZona(voo, local, regiao, `${motivo} Não cobre mais a entrega.`);
+    if (jaIndoParaZona) return { ...voo, mensagem: `${motivo} Ainda chega ${comArtigo(alvo.zona, 'à')} com margem` };
+    return desviarParaZona(voo, local, regiao, `${motivo} Não cobre mais ${terminar.oQue}.`);
   }
 
   // 3. Não chega com margem a lugar nenhum: paraquedas agora
@@ -740,7 +894,7 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
 function negociar(voo, outro) {
   const nos = { id: ID_NOSSO_DRONE, prioridade: voo.prioridade ?? 'saude', bateria: Math.round(voo.bateria ?? 100) };
   const dele = { id: outro.id, prioridade: outro.prioridade, bateria: Math.round(outro.bateria) };
-  const desvia = quemDesvia(nos, dele);
+  const { desvia, criterio } = quemDesvia(nos, dele);
 
   const acordo = { desvia, tempo: voo.tempo };
   const obstaculos = voo.obstaculos.map((o) => (o === outro ? { ...o, acordo } : o));
@@ -755,7 +909,7 @@ function negociar(voo, outro) {
   return {
     ...voo,
     obstaculos,
-    mensagem: `Drone ${outro.id} a ${Math.round(DETECCAO_RADIO_KM * 1000)} m. Conversa pelo rádio... Acordo: ${decisao}`,
+    mensagem: `Drone ${outro.id} a ${Math.round(DETECCAO_RADIO_KM * 1000)} m. Conversa pelo rádio... Acordo (${explicarCriterio(criterio, nos, dele)}): ${decisao}`,
   };
 }
 
@@ -857,8 +1011,28 @@ function aplicarEvento(voo, evento, regiao) {
 function chegarAoFim(voo, total) {
   const chegou = { ...voo, km: total, hodometro: (voo.hodometro || 0) + (total - voo.km) };
 
+  if (voo.situacao === 'voando' && voo.etapa === 'volta') {
+    const alvo = voo.destino;
+    if (alvo.ehHub) {
+      return iniciarDescida(chegou, ALTITUDE_CRUZEIRO, 'Sobre o hub: descendo na vertical', 'missao-concluida', 'Missão concluída: de volta ao hub!');
+    }
+    return iniciarDescida(
+      chegou,
+      ALTITUDE_CRUZEIRO,
+      `Sobre ${comArtigo(alvo, 'a')}: descendo na vertical`,
+      'pouso-emergencia',
+      `Entrega concluída. Pouso seguro ${comArtigo(alvo, 'na')} (a bateria não cobria a volta ao hub)`
+    );
+  }
+
   if (voo.situacao === 'voando') {
-    return iniciarDescida(chegou, ALTITUDE_CRUZEIRO, 'Sobre o destino: descendo na vertical', 'entregue', 'Entrega concluída!');
+    return iniciarDescida(
+      chegou,
+      ALTITUDE_CRUZEIRO,
+      'Sobre o destino: descendo na vertical',
+      'entregando',
+      'Pousou no ponto de entrega: entregando a carga...'
+    );
   }
 
   // Terminou de se afastar da área de risco: agora para no ar e espera o sinal
@@ -867,9 +1041,15 @@ function chegarAoFim(voo, total) {
   }
 
   if (voo.situacao === 'desviando' || voo.situacao === 'motor-fraco') {
-    const zona = voo.destino.id;
+    const zona = voo.destino;
     const altitude = altitudeDoVoo(chegou); // com motor fraco, chega mais baixo
-    return iniciarDescida(chegou, altitude, `Sobre a ${zona}: descendo na vertical`, 'pouso-emergencia', `Pouso seguro na ${zona}`);
+    return iniciarDescida(
+      chegou,
+      altitude,
+      `Sobre ${comArtigo(zona, 'a')}: descendo na vertical`,
+      'pouso-emergencia',
+      `Pouso seguro ${comArtigo(zona, 'na')}`
+    );
   }
 
   // Planando: chega com a altura que sobrou e desce em espiral sobre o ponto
@@ -892,8 +1072,29 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   // Se o drone já está no chão, nada muda
   if (!estaNoAr(voo)) return voo;
 
-  // Guarda o ponto de entrega, para retomar a rota depois de um desvio por GPS
+  // No começo: guarda o hub (de onde saiu), o ponto de entrega e a etapa da missão
   if (voo.destinoFinal === undefined) voo = { ...voo, destinoFinal: voo.destino };
+  if (voo.hub === undefined) {
+    voo = { ...voo, hub: voo.origem, etapa: 'ida' };
+
+    // Regra que vale sempre: só decola se a bateria cobrir ida + volta, com margem
+    if (voo.bateria !== undefined) {
+      const decolagem = verificarDecolagem(voo.origem, voo.destino, voo.bateria);
+      if (!decolagem.pode) {
+        return {
+          ...voo,
+          situacao: 'decolagem-negada',
+          mensagem: `Decolagem negada: a bateria tem ${Math.round(voo.bateria)}%, mas ida + volta + 30% de margem precisam de ${Math.round(decolagem.necessariaComMargem)}%`,
+        };
+      }
+    }
+  }
+
+  // Zonas controladas: as zonas de pouso E o hub (que também é uma área segura da SADEC).
+  // Em qualquer emergência, o drone procura uma delas, nunca o ponto de entrega.
+  if (!regiao.zonas.some((zona) => zona.ehHub)) {
+    regiao = { ...regiao, zonas: [...regiao.zonas, { id: 'Hub SADEC', x: voo.hub.x, y: voo.hub.y, ehHub: true }] };
+  }
 
   // O relógio da simulação anda (os obstáculos se movem conforme esse tempo)
   voo = { ...voo, tempo: (voo.tempo || 0) + segundosDoTique(voo, passoKm) };
@@ -929,7 +1130,8 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   }
 
   // Subindo ou descendo na vertical: o drone não sai do lugar
-  if (voo.situacao === 'decolando') return decolar(voo, eventos, passoKm);
+  if (voo.situacao === 'entregando') return entregar(voo, passoKm, regiao);
+  if (voo.situacao === 'decolando') return decolar(voo, eventos, passoKm, regiao);
   if (voo.situacao === 'descendo') return descer(voo, passoKm);
 
   // Sem GPS: parado no ar, tentando recuperar o sinal
@@ -957,6 +1159,15 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
     const direcao = direcaoDoTrecho(voo);
     const criados = novos.map((e) => criarObstaculo(e, local, direcao, voo.tempo));
     voo = { ...voo, obstaculos: [...(voo.obstaculos || []), ...criados] };
+  }
+
+  // Obstáculos que já ficaram para trás (passou da hora do encontro e estão a mais de 1 km) saem de cena
+  if (voo.obstaculos && voo.obstaculos.length > 0) {
+    const aqui = posicaoAtual(voo);
+    const aindaEmCena = voo.obstaculos.filter(
+      (o) => voo.tempo < o.chegada || distanciaKm(aqui, medirObstaculo(o, voo.tempo, aqui).agora) < DISTANCIA_SAI_DE_CENA_KM
+    );
+    if (aindaEmCena.length !== voo.obstaculos.length) voo = { ...voo, obstaculos: aindaEmCena };
   }
 
   // Desviador em tempo real (com motor fraco ou de paraquedas não há potência para manobrar)
@@ -1020,13 +1231,13 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
     const local = posicaoAtual(andou);
     const altitude = voo.altitudeInicial - voo.perdaPorKm * kmNovo;
     const prevista = chegadaPrevista(local, altitude, voo.destino, voo.vento || SEM_VENTO);
-    const zona = voo.destino.id;
+    const zona = comArtigo(voo.destino, 'à');
 
     if (respostaChegada(prevista) !== 'sim') {
-      return abrirParaquedas(andou, local, altitude, regiao, `Chegada à ${zona} ficou arriscada (${Math.round(prevista)} m previstos)!`);
+      return abrirParaquedas(andou, local, altitude, regiao, `Chegada ${zona} ficou arriscada (${Math.round(prevista)} m previstos)!`);
     }
     const reserva = voo.semGps ? ' (navegação de reserva)' : '';
-    return { ...andou, mensagem: `Motor fraco, rumo à ${zona}${reserva}. Chegada prevista: ${Math.round(prevista)} m` };
+    return { ...andou, mensagem: `Motor fraco, rumo ${zona}${reserva}. Chegada prevista: ${Math.round(prevista)} m` };
   }
 
   // Chegou ao fim do trecho?
