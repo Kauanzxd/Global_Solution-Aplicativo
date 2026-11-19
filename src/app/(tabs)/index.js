@@ -15,14 +15,11 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // Ex.: [{ tipo: 'vento', km: 0.5, velocidade: 8, de: 'sul' }, { tipo: 'falha-grave', km: 1.7 }]
 // Motor: { tipo: 'motor', km: 3.5 } chega à ZP com folga;
 // { tipo: 'motor', km: 1.5 } não chegaria com folga, então abre o paraquedas na hora
-// GPS: { tipo: 'gps', km: 2 } o sinal volta; { tipo: 'gps', km: 2, recupera: false } não volta
+// GPS: { tipo: 'gps', km: 1.7, duracao: 60 } o sinal volta depois de 60 s; sem "duracao", não volta.
 // O km é o da viagem inteira (hodômetro): eventos também acontecem no meio de um desvio.
-// { durante: 'gps' } no lugar do km = acontece enquanto o drone espera o sinal voltar.
+// { durante: 'gps' } no lugar do km = acontece 10 s depois da perda do sinal.
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [
-  { tipo: 'gps', km: 2, recupera: false },
-  { tipo: 'falha-grave', km: 2.8 }, // no meio do desvio, ainda sem GPS
-];
+const EVENTOS = [{ tipo: 'gps', km: 1.7 }]; // em cima da Anhanguera, e o sinal não volta
 const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
