@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Cabecalho from '../../componentes/Cabecalho';
 import Mapa from '../../componentes/Mapa';
 import { AREAS, LOCAIS, VIAS, ZONAS_POUSO } from '../../dados/regiao';
@@ -49,9 +49,9 @@ const PASSO_KM = KM_POR_SEGUNDO * (PASSO_MS / 1000);
 // Ele reage mais rápido, o que faz diferença contra obstáculos imprevisíveis.
 const DECISOES_POR_TIQUE = 4;
 
-// Aba "Simular" (rota "/"): aqui vai ficar o simulador de voo.
-export default function Simular() {
-  const [voo, setVoo] = useState({
+// Um voo novo, parado no hub, pronto para decolar
+function criarVoo() {
+  return {
     origem: hub,
     destino,
     km: 0,
@@ -60,8 +60,14 @@ export default function Simular() {
     prioridade: PRIORIDADE,
     situacao: 'decolando',
     mensagem: 'Decolando...',
-  });
-  const emVoo = estaNoAr(voo);
+  };
+}
+
+// Aba "Simular" (rota "/"): aqui vai ficar o simulador de voo.
+export default function Simular() {
+  // null = montando a simulação (o drone ainda não saiu); um objeto = o voo acontecendo
+  const [voo, setVoo] = useState(null);
+  const emVoo = voo !== null && estaNoAr(voo);
 
   // Enquanto o drone está no ar, um "relógio" avança o voo a cada PASSO_MS
   useEffect(() => {
@@ -81,13 +87,14 @@ export default function Simular() {
     return () => clearInterval(relogio);
   }, [emVoo]);
 
-  const posicao = posicaoNaRota(voo.origem, voo.destino, voo.km);
-  const altitude = altitudeDoVoo(voo);
+  // Antes de simular, o drone está parado no hub
+  const posicao = voo ? posicaoNaRota(voo.origem, voo.destino, voo.km) : hub;
+  const altitude = voo ? altitudeDoVoo(voo) : 0;
 
   // Zoom suave: a cada atualização do voo, a vista anda 30% do caminho até o alvo
   // (perto de um obstáculo: aproximada; senão: o mapa inteiro)
   const [vista, setVista] = useState(VISTA_NORMAL);
-  const obstaculoPerto = algumObstaculoPerto(voo.obstaculos, voo.tempo, posicao, RAIO_ZOOM_KM);
+  const obstaculoPerto = voo !== null && algumObstaculoPerto(voo.obstaculos, voo.tempo, posicao, RAIO_ZOOM_KM);
   const vistaAlvo = obstaculoPerto && emVoo ? VISTA_APROXIMADA : VISTA_NORMAL;
   useEffect(() => {
     setVista((atual) => {
@@ -96,9 +103,9 @@ export default function Simular() {
     });
   }, [voo, vistaAlvo]);
   // Depois de uma pane ou falha grave em voo, o trecho atual é o desvio
-  const desvio = voo.emergencia ? voo : null;
+  const desvio = voo && voo.emergencia ? voo : null;
   // Paraquedas aberto. Sobre o hub não há planeio: sem áreas de alcance, os círculos não aparecem.
-  const paraquedas = voo.paraquedasAberto ? { alcance: voo.alcance, confortavel: voo.confortavel } : null;
+  const paraquedas = voo && voo.paraquedasAberto ? { alcance: voo.alcance, confortavel: voo.confortavel } : null;
 
   return (
     <View style={styles.container}>
@@ -110,14 +117,27 @@ export default function Simular() {
           desvio={desvio}
           altitude={altitude}
           paraquedas={paraquedas}
-          vento={voo.vento}
-          incerteza={incertezaDoVoo(voo)}
-          obstaculos={(voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo))}
+          vento={voo ? voo.vento : null}
+          incerteza={voo ? incertezaDoVoo(voo) : 0}
+          obstaculos={voo ? (voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo)) : []}
           vista={vista}
         />
       </View>
-      <Text style={styles.status}>{voo.mensagem}</Text>
-      <Text style={styles.bateria}>Bateria: {Math.round(voo.bateria)}%</Text>
+
+      {/* Montando: só o botão de começar. Voando ou terminado: a situação e o botão de reiniciar. */}
+      {voo === null ? (
+        <Pressable style={styles.botao} onPress={() => setVoo(criarVoo())}>
+          <Text style={styles.textoBotao}>Simular</Text>
+        </Pressable>
+      ) : (
+        <View>
+          <Text style={styles.status}>{voo.mensagem}</Text>
+          <Text style={styles.bateria}>Bateria: {Math.round(voo.bateria)}%</Text>
+          <Pressable style={[styles.botao, styles.botaoSecundario]} onPress={() => setVoo(null)}>
+            <Text style={[styles.textoBotao, styles.textoSecundario]}>Reiniciar</Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
@@ -143,5 +163,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     color: '#5A6573',
+  },
+  botao: {
+    marginTop: 16,
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: '#0B5CAD',
+    alignItems: 'center',
+  },
+  textoBotao: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  // Botão secundário: fundo branco com borda (menos chamativo que o principal)
+  botaoSecundario: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#0B5CAD',
+  },
+  textoSecundario: {
+    color: '#0B5CAD',
   },
 });
