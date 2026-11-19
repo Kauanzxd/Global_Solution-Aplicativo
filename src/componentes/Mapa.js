@@ -102,7 +102,7 @@ function ZonaPouso({ zona }) {
 // O drone visto de cima: dois braços em "X" com uma hélice em cada ponta.
 // A altitude aparece de dois jeitos: o número em metros acima do drone e uma
 // sombra no chão que se afasta dele quanto mais alto ele está.
-function Drone({ x, y, altitude, comParaquedas }) {
+function Drone({ x, y, altitude, comParaquedas, incerteza }) {
   const cx = x * ESCALA;
   const cy = y * ESCALA;
   const braco = 2.2;
@@ -135,6 +135,8 @@ function Drone({ x, y, altitude, comParaquedas }) {
         </G>
       )}
       <Rotulo x={cx} y={alturaRotulo} texto={`${altitude} m`} tamanho="2.4" />
+      {/* Sem GPS: o tamanho do erro da posição, embaixo do drone */}
+      {incerteza > 0 && <Rotulo x={cx} y={cy + 6} texto={`sem GPS ±${incerteza} m`} tamanho="2" />}
     </G>
   );
 }
@@ -180,7 +182,8 @@ function IndicadorVento({ vento }) {
 // "paraquedas" (opcional): paraquedas aberto. Na falha grave em voo, traz as áreas
 // { alcance, confortavel }, cada uma um círculo { centro, raio } em km
 // "vento" (opcional): { x, y, velocidade, de } — aparece como seta no canto
-export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas, vento }) {
+// "incerteza" (opcional): erro da posição em metros, quando o drone está sem GPS
+export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas, vento, incerteza = 0 }) {
   const hub = LOCAIS.find((local) => local.id === 'hub');
   const posicaoDrone = drone || hub;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -332,6 +335,7 @@ export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas,
           y={posicaoDrone.y}
           altitude={altitude}
           comParaquedas={Boolean(paraquedas) && altitude > 0}
+          incerteza={incerteza}
         />
 
         {/* 12. Indicador de vento (só quando há vento) */}

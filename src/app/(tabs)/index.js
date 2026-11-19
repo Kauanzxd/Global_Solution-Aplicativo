@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Cabecalho from '../../componentes/Cabecalho';
 import Mapa from '../../componentes/Mapa';
 import { AREAS, LOCAIS, VIAS, ZONAS_POUSO } from '../../dados/regiao';
-import { altitudeDoVoo, avancarVoo, estaNoAr, posicaoNaRota } from '../../regras/voo';
+import { altitudeDoVoo, avancarVoo, estaNoAr, incertezaDoVoo, posicaoNaRota } from '../../regras/voo';
 
 const hub = LOCAIS.find((local) => local.id === 'hub');
 const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
@@ -21,7 +21,7 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
 const EVENTOS = [
   { tipo: 'gps', km: 2, recupera: false },
-  { tipo: 'falha-grave', durante: 'gps' },
+  { tipo: 'falha-grave', km: 2.8 }, // no meio do desvio, ainda sem GPS
 ];
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
@@ -70,6 +70,7 @@ export default function Simular() {
           altitude={altitude}
           paraquedas={paraquedas}
           vento={voo.vento}
+          incerteza={incertezaDoVoo(voo)}
         />
       </View>
       <Text style={styles.status}>{voo.mensagem}</Text>

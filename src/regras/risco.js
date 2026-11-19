@@ -57,19 +57,37 @@ export function distanciaAteVia(ponto, via) {
   return menor;
 }
 
+// Distância do ponto até a borda de um polígono: é a distância até uma "via"
+// que dá a volta no polígono e termina onde começou
+export function distanciaAtePoligono(ponto, pontos) {
+  return distanciaAteVia(ponto, { pontos: [...pontos, pontos[0]] });
+}
+
 // Qual o risco de o drone descer neste ponto?
 // 'proibido': perto de rodovia, Rodoanel ou trilho (risco de acidente em cadeia)
 // 'alto':     bairro urbano ou perto de estrada local
 // 'medio':    terreno aberto
 // 'baixo':    mata ou parque (o melhor lugar)
-export function riscoNoPonto(ponto, areas, vias) {
-  const viasPerto = vias.filter((via) => distanciaAteVia(ponto, via) <= DISTANCIA_SEGURA_VIA_KM);
+//
+// "incertezaKm" (opcional): o quanto o drone pode estar errado sobre onde está
+// (sem GPS). Na dúvida, ele se protege: as faixas de segurança aumentam nesse tanto.
+export function riscoNoPonto(ponto, areas, vias, incertezaKm = 0) {
+  const faixa = DISTANCIA_SEGURA_VIA_KM + incertezaKm;
+  const viasPerto = vias.filter((via) => distanciaAteVia(ponto, via) <= faixa);
 
   // As vias vêm primeiro: perto de uma via movimentada, nada mais importa
   if (viasPerto.some((via) => via.tipo !== 'estrada')) return 'proibido';
   if (viasPerto.length > 0) return 'alto';
 
   const area = areas.find((a) => pontoNoPoligono(ponto, a.pontos));
+  if (area && area.tipo === 'urbano') return 'alto';
+
+  // Perto da borda de um bairro: com a incerteza, pode ser que esteja dentro dele
+  const pertoDeBairro =
+    incertezaKm > 0 &&
+    areas.some((a) => a.tipo === 'urbano' && distanciaAtePoligono(ponto, a.pontos) <= incertezaKm);
+  if (pertoDeBairro) return 'alto';
+
   if (!area) return 'medio'; // fora de qualquer área: terreno aberto
-  return area.tipo === 'urbano' ? 'alto' : 'baixo';
+  return 'baixo'; // mata ou parque
 }

@@ -109,7 +109,8 @@ const ORDEM_RISCO = { zona: 0, baixo: 1, medio: 2, alto: 3, proibido: 4 };
 const ACEITAVEIS = ['zona', 'baixo', 'medio'];
 
 // Escolhe onde pousar de paraquedas, a partir do local e da altitude da falha.
-export function escolherPouso(local, altitude, zonas, areas, vias, vento = SEM_VENTO) {
+// "incertezaKm" (opcional): sem GPS, o drone amplia as faixas de segurança nesse tanto.
+export function escolherPouso(local, altitude, zonas, areas, vias, vento = SEM_VENTO, incertezaKm = 0) {
   // Alcance total (chega ao chão) e confortável (chega com a margem para a espiral final)
   const alcance = areaDeAlcance(local, altitude, 0, vento);
   const confortavel = areaDeAlcance(local, altitude, MARGEM_POUSO_M, vento);
@@ -117,7 +118,7 @@ export function escolherPouso(local, altitude, zonas, areas, vias, vento = SEM_V
   // Todas as opções: zonas de pouso + pontos candidatos dentro da área de alcance
   const opcoesZonas = zonas.map((zona) => ({ ponto: zona, risco: 'zona', nome: zona.id }));
   const opcoesPontos = pontosCandidatos(alcance.centro, alcance.raio).map((ponto) => {
-    const risco = riscoNoPonto(ponto, areas, vias);
+    const risco = riscoNoPonto(ponto, areas, vias, incertezaKm);
     return { ponto, risco, nome: `área de risco ${NOMES_RISCO[risco]}` };
   });
   const opcoes = [...opcoesZonas, ...opcoesPontos]

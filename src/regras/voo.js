@@ -39,6 +39,8 @@ const CHEGADA_SEGURA_M = 60; // só segue para a zona se a previsão for chegar 
 
 // GPS
 const TIQUES_TENTANDO_GPS = 60; // fica 60 tiques (3 s na tela) parado tentando recuperar o sinal
+const INCERTEZA_INICIAL_M = 10; // ao perder o GPS, a posição já pode estar errada em 10 m...
+const INCERTEZA_POR_TIQUE_M = 1.5; // ...e o erro cresce 1,5 m a cada tique sem GPS
 
 const NO_AR = ['decolando', 'voando', 'desviando', 'motor-fraco', 'sem-gps', 'planando', 'descendo'];
 
@@ -87,9 +89,15 @@ function posicaoAtual(voo) {
 }
 
 // O que continua valendo quando o drone começa um trecho novo:
-// o vento, o hodômetro e se ele está sem GPS
+// o vento, o hodômetro, se ele está sem GPS e o tamanho do erro da posição
 function continuar(voo) {
-  return { vento: voo.vento, hodometro: voo.hodometro || 0, semGps: voo.semGps };
+  return { vento: voo.vento, hodometro: voo.hodometro || 0, semGps: voo.semGps, incerteza: voo.incerteza };
+}
+
+// Sem GPS, o drone estima onde está (bússola + sensores + câmera), e o erro
+// dessa estimativa cresce com o tempo. Devolve o erro em metros.
+export function incertezaDoVoo(voo) {
+  return voo.semGps ? Math.round(voo.incerteza) : 0;
 }
 
 // Transforma um evento de vento ({ tipo: 'vento', velocidade: 8, de: 'sul' })
@@ -192,7 +200,11 @@ function abrirParaquedas(voo, local, altitude, regiao, motivo) {
   }
 
   const vento = voo.vento || SEM_VENTO;
-  const pouso = escolherPouso(local, altitude, regiao.zonas, regiao.areas, regiao.vias, vento);
+  const incerteza = incertezaDoVoo(voo);
+  const pouso = escolherPouso(local, altitude, regiao.zonas, regiao.areas, regiao.vias, vento, incerteza / 1000);
+
+  // Sem GPS, avisa que as margens foram ampliadas
+  const aviso = incerteza > 0 ? ` Posição incerta (±${Math.round(incerteza)} m): margens ampliadas.` : '';
 
   return {
     ...continuar(voo),
@@ -207,7 +219,7 @@ function abrirParaquedas(voo, local, altitude, regiao, motivo) {
     alcance: pouso.alcance,
     confortavel: pouso.confortavel,
     nomePouso: pouso.nome,
-    mensagem: `${motivo} Paraquedas aberto, planando para ${pouso.nome}`,
+    mensagem: `${motivo}${aviso} Paraquedas aberto, planando para ${pouso.nome}`,
   };
 }
 
@@ -302,7 +314,7 @@ function pairarSemGps(voo, eventos, regiao) {
 
   // Acabou o tempo de tentativa
   if (voo.gpsVolta) {
-    return { ...voo, situacao: 'voando', semGps: false, mensagem: 'Sinal de GPS recuperado! Seguindo a rota' };
+    return { ...voo, situacao: 'voando', semGps: false, incerteza: 0, mensagem: 'Sinal de GPS recuperado! Seguindo a rota' };
   }
   return desviarParaZona(voo, posicaoAtual(voo), regiao, 'GPS não voltou: navegação de reserva (bússola e câmera).');
 }
@@ -343,13 +355,20 @@ function aplicarEvento(voo, evento, regiao) {
 
     case 'gps':
       // No meio de uma emergência, o drone não para: segue com a navegação de reserva
+      if (voo.semGps) return null; // já está sem GPS
       if (emEmergencia) {
-        return { ...voo, semGps: true, mensagem: 'GPS perdido durante a emergência: seguindo com navegação de reserva' };
+        return {
+          ...voo,
+          semGps: true,
+          incerteza: INCERTEZA_INICIAL_M,
+          mensagem: 'GPS perdido durante a emergência: seguindo com navegação de reserva',
+        };
       }
       return {
         ...voo,
         situacao: 'sem-gps',
         semGps: true,
+        incerteza: INCERTEZA_INICIAL_M,
         tiquesPairando: 0,
         gpsVolta: evento.recupera !== false, // se o evento não disser nada, o sinal volta
         mensagem: `Sinal de GPS perdido ${onde}! Parado no ar, tentando recuperar...`,
@@ -395,6 +414,11 @@ function chegarAoFim(voo, total) {
 export function avancarVoo(voo, passoKm, eventos, regiao) {
   // Se o drone já está no chão, nada muda
   if (!estaNoAr(voo)) return voo;
+
+  // Sem GPS, a cada tique o erro da posição estimada cresce um pouco
+  if (voo.semGps) {
+    voo = { ...voo, incerteza: voo.incerteza + INCERTEZA_POR_TIQUE_M };
+  }
 
   // Subindo ou descendo na vertical: o drone não sai do lugar
   if (voo.situacao === 'decolando') return decolar(voo, eventos);
