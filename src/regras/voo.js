@@ -28,6 +28,7 @@ import {
   MARGEM_POUSO_M,
   SEM_VENTO,
   escolherPouso,
+  pontosCandidatos,
   tempoAteOPonto,
   vetorVento,
 } from './paraquedas.js';
@@ -53,6 +54,15 @@ const FOLGA_AFASTAMENTO_M = 40; // o erro ainda vai crescer enquanto o drone se 
 const PASSO_BUSCA_KM = 0.02; // procura o ponto seguro de 20 em 20 m
 const EMPATE_KM = 0.1; // se os dois caminhos forem parecidos (até 100 m), prefere o destino
 const SEGUNDOS_EVENTO_SEM_GPS = 10; // eventos { durante: 'gps' } acontecem 10 s depois da perda
+
+// Temperatura (superaquecimento de motores ou bateria)
+// 'alta':    reduz a velocidade para esquentar menos; a bateria quente rende menos
+// 'critica': risco de incêndio na bateria: pousa o quanto antes
+const VELOCIDADE_TEMPERATURA_ALTA = 0.8; // anda a 80% da velocidade
+const CONSUMO_TEMPERATURA_ALTA = 1.1; // gasta 10% a mais por segundo
+// Por km, gasta mais ainda: demora 1/0,8 do tempo × 1,1 por segundo ≈ 1,4 vez o normal
+const FATOR_KM_TEMPERATURA_ALTA = CONSUMO_TEMPERATURA_ALTA / VELOCIDADE_TEMPERATURA_ALTA;
+const DISTANCIA_MAXIMA_CRITICA_KM = 1; // em temperatura crítica, só vai a uma zona até 1 km
 
 // Bateria: quantos segundos de verdade cada tique representa nas fases paradas.
 // (Andando, o tique é o tempo de voar o pedaço do caminho: 0,05 km a 15 m/s ≈ 3,3 s.)
@@ -112,6 +122,7 @@ function continuar(voo) {
     vento: voo.vento,
     hodometro: voo.hodometro || 0,
     bateria: voo.bateria,
+    temperaturaAlta: voo.temperaturaAlta,
     destinoFinal: voo.destinoFinal, // o ponto de entrega, para retomar a rota se der
     // GPS
     semGps: voo.semGps,
@@ -132,7 +143,8 @@ function segundosDoTique(voo, passoKm) {
 function consumoDoTique(voo, passoKm) {
   // De paraquedas, os motores estão desligados: não gasta nada
   if (voo.situacao === 'planando' || (voo.situacao === 'descendo' && voo.paraquedasAberto)) return 0;
-  return CONSUMO_POR_SEGUNDO * segundosDoTique(voo, passoKm);
+  const extra = voo.temperaturaAlta ? CONSUMO_TEMPERATURA_ALTA : 1; // bateria quente rende menos
+  return CONSUMO_POR_SEGUNDO * segundosDoTique(voo, passoKm) * extra;
 }
 
 // Sem GPS, o drone estima onde está (bússola + sensores + câmera), e o erro
@@ -463,6 +475,63 @@ function pairarSemGps(voo, regiao) {
   };
 }
 
+// ---------- Temperatura ----------
+// Evento: { tipo: 'temperatura', km: 2 } = temperatura alta
+//         { tipo: 'temperatura', km: 2, grau: 'critica' } = crítica
+// Uma segunda temperatura alta, com o drone já quente, vira crítica.
+
+// Temperatura alta: reduz a velocidade e recalcula a bateria com o gasto maior.
+// Se não der para entregar e ainda ir a uma zona com margem, vai direto para a zona.
+function temperaturaAlta(voo, local, regiao, motivo) {
+  const quente = { ...voo, temperaturaAlta: true };
+  if (voo.situacao !== 'voando') {
+    return { ...quente, mensagem: `${motivo} Velocidade reduzida para esfriar` }; // já em emergência
+  }
+
+  const destino = voo.destinoFinal;
+  const zonaDepois = zonaMaisProxima(destino, regiao.zonas);
+  const precisa =
+    bateriaParaEntregarEIrAZona(distanciaKm(local, destino), zonaDepois.distancia) * FATOR_KM_TEMPERATURA_ALTA;
+  const tem = voo.bateria ?? 100;
+
+  if (tem < precisa) {
+    return desviarParaZona(
+      quente,
+      local,
+      regiao,
+      `${motivo} Mais devagar e gastando mais, a bateria (${Math.round(tem)}%) não cobre a entrega (${Math.round(precisa)}%).`
+    );
+  }
+  return { ...quente, mensagem: `${motivo} Velocidade reduzida para esfriar, entrega mantida` };
+}
+
+// Temperatura crítica: risco de incêndio. Pousa o quanto antes, num lugar sem gente:
+// a zona de pouso mais próxima, se estiver a até 1 km; senão, o ponto seguro mais perto.
+function temperaturaCritica(voo, local, regiao, motivo) {
+  const { zona, distancia } = zonaMaisProxima(local, regiao.zonas);
+  if (distancia <= DISTANCIA_MAXIMA_CRITICA_KM) {
+    return desviarParaZona(voo, local, regiao, `${motivo} Pouso imediato.`);
+  }
+
+  // Procura, num raio de 1 km, o ponto seguro (sem via nem bairro) mais perto
+  const seguros = pontosCandidatos(local, DISTANCIA_MAXIMA_CRITICA_KM)
+    .filter((ponto) => seguroParaPairar(ponto, incertezaDoVoo(voo) / 1000, regiao))
+    .sort((a, b) => distanciaKm(local, a) - distanciaKm(local, b));
+
+  if (seguros.length === 0) return desviarParaZona(voo, local, regiao, `${motivo} Pouso imediato.`);
+
+  const areaSegura = { ...seguros[0], id: 'área segura mais próxima' };
+  return {
+    ...continuar(voo),
+    origem: local,
+    destino: areaSegura,
+    km: 0,
+    situacao: 'desviando',
+    emergencia: true,
+    mensagem: `${motivo} A ${zona.id} está longe: pouso imediato na área segura mais próxima`,
+  };
+}
+
 // ---------- Eventos ----------
 
 // O que o drone faz quando um evento acontece. Recebe o drone no ponto exato do evento.
@@ -496,6 +565,14 @@ function aplicarEvento(voo, evento, regiao) {
 
     case 'falha-grave':
       return abrirParaquedas(voo, local, altitude, regiao, `Falha grave ${onde}!`);
+
+    case 'temperatura':
+      if (voo.situacao === 'planando') return null; // motores desligados: já não esquentam
+      // Crítica, ou alta com o drone já quente
+      if (evento.grau === 'critica' || voo.temperaturaAlta) {
+        return temperaturaCritica(voo, local, regiao, `Temperatura crítica ${onde}!`);
+      }
+      return temperaturaAlta(voo, local, regiao, `Temperatura alta ${onde}!`);
 
     case 'gps':
       // No meio de uma emergência, o drone não para: segue com a navegação de reserva
@@ -601,6 +678,7 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   let passo = passoKm;
   if (voo.situacao === 'planando') passo = passoKm * VELOCIDADE_PARAQUEDAS;
   if (voo.situacao === 'motor-fraco') passo = passoKm * VELOCIDADE_MOTOR_FRACO;
+  if (voo.temperaturaAlta && voo.situacao !== 'planando') passo *= VELOCIDADE_TEMPERATURA_ALTA;
 
   const kmNovo = voo.km + passo;
   const total = distanciaKm(voo.origem, voo.destino);

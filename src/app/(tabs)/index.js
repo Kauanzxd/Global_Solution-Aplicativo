@@ -18,8 +18,13 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // GPS: { tipo: 'gps', km: 1.7, duracao: 60 } o sinal volta depois de 60 s; sem "duracao", não volta.
 // O km é o da viagem inteira (hodômetro): eventos também acontecem no meio de um desvio.
 // { durante: 'gps' } no lugar do km = acontece 10 s depois da perda do sinal.
+// Temperatura: { tipo: 'temperatura', km: 1 } = alta; { ..., grau: 'critica' } = crítica.
+// Uma segunda temperatura alta, com o drone já quente, vira crítica.
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [{ tipo: 'gps', km: 1.7 }]; // em cima da Anhanguera, e o sinal não volta
+const EVENTOS = [
+  { tipo: 'temperatura', km: 1 }, // alta: reduz a velocidade e mantém a entrega
+  { tipo: 'temperatura', km: 2.5 }, // piorou: vira crítica, pouso imediato
+];
 const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
