@@ -12,11 +12,11 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // Outros testes: [{ tipo: 'pane', km: 1.5 }], [{ tipo: 'falha-grave', km: 0 }] ou
 // [{ tipo: 'falha-grave', km: 0, altitude: 20 }]. km 0 = durante a decolagem.
 // Vento: velocidade em m/s e "de" = de onde vem (norte, sul, leste, oeste, nordeste...)
+// Ex.: [{ tipo: 'vento', km: 0.5, velocidade: 8, de: 'sul' }, { tipo: 'falha-grave', km: 1.7 }]
+// Motor: { tipo: 'motor', km: 3.5 } chega à ZP com folga;
+// { tipo: 'motor', km: 1.5 } não chegaria com folga, então abre o paraquedas na hora
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [
-  { tipo: 'vento', km: 0.5, velocidade: 8, de: 'sul' },
-  { tipo: 'falha-grave', km: 1.7 }, // bem em cima da Rodovia Anhanguera
-];
+const EVENTOS = [{ tipo: 'motor', km: 3.5 }];
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho

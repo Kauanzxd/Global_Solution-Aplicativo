@@ -43,8 +43,12 @@ export function vetorVento(velocidade, de) {
 // No chão, ele anda: deslocamento = (velocidade do drone no ar + vento) × tempo.
 // A velocidade no ar tem tamanho fixo (9 m/s). Isso vira uma equação do 2º grau
 // no tempo t:   a·t² + b·t + c = 0   — e resolvemos com Bhaskara.
-export function tempoAteOPonto(deslocamento, vento) {
-  const a = VELOCIDADE_AR_MS ** 2 - (vento.x ** 2 + vento.y ** 2);
+// "velocidadeAr" é opcional: o padrão é a do paraquedas, mas o drone com motor
+// fraco também usa esta conta, com a velocidade dele.
+export function tempoAteOPonto(deslocamento, vento, velocidadeAr = VELOCIDADE_AR_MS) {
+  if (deslocamento.x === 0 && deslocamento.y === 0) return 0; // já está lá
+
+  const a = velocidadeAr ** 2 - (vento.x ** 2 + vento.y ** 2);
   const b = 2 * (deslocamento.x * vento.x + deslocamento.y * vento.y);
   const c = -(deslocamento.x ** 2 + deslocamento.y ** 2);
 
