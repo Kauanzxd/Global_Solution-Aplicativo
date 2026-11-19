@@ -1,5 +1,5 @@
 import { StyleSheet, View } from 'react-native';
-import Svg, { Circle, G, Line, Polygon, Polyline, Rect, Text } from 'react-native-svg';
+import Svg, { Circle, G, Line, Path, Polygon, Polyline, Rect, Text } from 'react-native-svg';
 import { AREAS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
 
 // O desenho usa um "papel" de 100 x 100 unidades (o viewBox).
@@ -102,11 +102,13 @@ function ZonaPouso({ zona }) {
 // O drone visto de cima: dois braços em "X" com uma hélice em cada ponta.
 // A altitude aparece de dois jeitos: o número em metros acima do drone e uma
 // sombra no chão que se afasta dele quanto mais alto ele está.
-function Drone({ x, y, altitude }) {
+function Drone({ x, y, altitude, comParaquedas }) {
   const cx = x * ESCALA;
   const cy = y * ESCALA;
   const braco = 2.2;
   const afastamentoSombra = (altitude / 120) * 2.5; // 0 no chão, 2,5 a 120 m
+  // Com paraquedas, o número da altitude sobe para não ficar em cima da cúpula
+  const alturaRotulo = comParaquedas ? cy - 9 : cy - 4;
 
   return (
     <G>
@@ -118,7 +120,21 @@ function Drone({ x, y, altitude }) {
       <Circle cx={cx - braco} cy={cy + braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
       <Circle cx={cx + braco} cy={cy + braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
       <Circle cx={cx} cy={cy} r="1.0" fill="#0B1F33" />
-      <Rotulo x={cx} y={cy - 4} texto={`${altitude} m`} tamanho="2.4" />
+      {comParaquedas && (
+        <G>
+          {/* Cordas: do drone até as pontas da cúpula */}
+          <Line x1={cx} y1={cy} x2={cx - 3.5} y2={cy - 4} stroke="#555555" strokeWidth="0.3" />
+          <Line x1={cx} y1={cy} x2={cx + 3.5} y2={cy - 4} stroke="#555555" strokeWidth="0.3" />
+          {/* Cúpula: uma curva de uma ponta à outra, fechada embaixo */}
+          <Path
+            d={`M ${cx - 3.5} ${cy - 4} Q ${cx} ${cy - 9} ${cx + 3.5} ${cy - 4} Z`}
+            fill="#D32F2F"
+            stroke="#FFFFFF"
+            strokeWidth="0.4"
+          />
+        </G>
+      )}
+      <Rotulo x={cx} y={alturaRotulo} texto={`${altitude} m`} tamanho="2.4" />
     </G>
   );
 }
@@ -127,7 +143,8 @@ function Drone({ x, y, altitude }) {
 // "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
 // "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
 // "altitude" é a altura do drone em metros (0 = no chão)
-export default function Mapa({ destino, drone, desvio, altitude = 0 }) {
+// "paraquedas" (opcional): { centro, alcance, alcanceConfortavel } da falha grave
+export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas }) {
   const hub = LOCAIS.find((local) => local.id === 'hub');
   const posicaoDrone = drone || hub;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -229,6 +246,32 @@ export default function Mapa({ destino, drone, desvio, altitude = 0 }) {
           />
         )}
 
+        {/* Alcance do paraquedas: círculo de fora = até onde ele consegue planar;
+            círculo de dentro = até onde ele chega com margem para um pouso suave */}
+        {paraquedas && (
+          <G>
+            <Circle
+              cx={paraquedas.centro.x * ESCALA}
+              cy={paraquedas.centro.y * ESCALA}
+              r={paraquedas.alcance * ESCALA}
+              fill="#D32F2F"
+              fillOpacity="0.08"
+              stroke="#D32F2F"
+              strokeWidth="0.4"
+              strokeDasharray="1 1"
+            />
+            <Circle
+              cx={paraquedas.centro.x * ESCALA}
+              cy={paraquedas.centro.y * ESCALA}
+              r={paraquedas.alcanceConfortavel * ESCALA}
+              fill="#2E7D32"
+              fillOpacity="0.12"
+              stroke="#2E7D32"
+              strokeWidth="0.3"
+            />
+          </G>
+        )}
+
         {/* Desvio de emergência: linha laranja do ponto da pane até a zona de pouso */}
         {desvio && (
           <Line
@@ -248,7 +291,12 @@ export default function Mapa({ destino, drone, desvio, altitude = 0 }) {
         ))}
 
         {/* 11. Drone: por último de tudo, para ficar por cima */}
-        <Drone x={posicaoDrone.x} y={posicaoDrone.y} altitude={altitude} />
+        <Drone
+          x={posicaoDrone.x}
+          y={posicaoDrone.y}
+          altitude={altitude}
+          comParaquedas={Boolean(paraquedas) && altitude > 0}
+        />
       </Svg>
     </View>
   );

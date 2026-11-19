@@ -1,22 +1,40 @@
 // Regras do voo do drone. Só contas, sem desenho.
+//
+// Fases do voo (voo.situacao):
+//   'decolando'  sobe na vertical em cima do hub até 120 m
+//   'voando'     vai do hub até o destino a 120 m
+//   'desviando'  depois de uma pane, vai até a zona de pouso a 120 m
+//   'planando'   depois de uma falha grave, plana de paraquedas até o ponto escolhido
+//   'descendo'   desce na vertical (com motor, ou de paraquedas em espiral)
+// Fases finais (no chão): 'entregue', 'pouso-emergencia', 'pouso-paraquedas',
+// 'pousou-hub' e 'queda'.
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
+import { ALTITUDE_MINIMA_PARAQUEDAS, MARGEM_POUSO_M, altitudeAoChegar, escolherPouso } from './paraquedas.js';
 
 export const ALTITUDE_CRUZEIRO = 120; // metros: teto comum para drones no Brasil
-const RAMPA_KM = 0.4; // distância que o drone usa para subir (ou para descer)
+const VELOCIDADE_PARAQUEDAS = 0.15; // planando, anda a 15% da velocidade normal
+const VERTICAL_POR_PASSO_M = 3; // na vertical, com motor: 3 m a cada tique do relógio
+const VERTICAL_PARAQUEDAS_POR_PASSO_M = 1.5; // descendo de paraquedas: mais devagar
+const ALTITUDE_EVENTO_DECOLAGEM = 60; // eventos no km 0 acontecem a 60 m, se não disser outra
 
-// Altitude do drone, em metros, no ponto atual do trecho.
-// Ele sobe no começo da rota, voa a 120 m e desce no fim do trecho.
+const NO_AR = ['decolando', 'voando', 'desviando', 'planando', 'descendo'];
+
+export function estaNoAr(voo) {
+  return NO_AR.includes(voo.situacao);
+}
+
+// Altitude do drone, em metros
 export function altitudeDoVoo(voo) {
-  const total = distanciaKm(voo.origem, voo.destino);
+  if (!estaNoAr(voo)) return 0;
 
-  // Só a rota original começa no chão (no hub); o desvio já começa no ar
-  const comecouNoChao = voo.situacao === 'voando' || voo.situacao === 'entregue';
+  // Na vertical, a altitude fica guardada no próprio voo
+  if (voo.situacao === 'decolando' || voo.situacao === 'descendo') return Math.round(voo.altitude);
 
-  // Fatores de 0 a 1: 0 = no chão, 1 = altitude de cruzeiro
-  const fatorSubida = comecouNoChao ? Math.min(voo.km / RAMPA_KM, 1) : 1;
-  const fatorDescida = Math.min((total - voo.km) / RAMPA_KM, 1);
+  // Planando: perde 1 m a cada 3 m que anda
+  if (voo.situacao === 'planando') return Math.round(altitudeAoChegar(voo.altitudeInicial, voo.km));
 
-  return Math.round(ALTITUDE_CRUZEIRO * Math.min(fatorSubida, fatorDescida));
+  // Voando ou desviando: sempre na altitude de cruzeiro
+  return ALTITUDE_CRUZEIRO;
 }
 
 // Onde o drone está depois de voar "kmVoados" na reta da origem até o destino.
@@ -24,6 +42,8 @@ export function altitudeDoVoo(voo) {
 // específicos, como "pane no km 1,5".
 export function posicaoNaRota(origem, destino, kmVoados) {
   const total = distanciaKm(origem, destino);
+  if (total === 0) return origem; // trecho sem comprimento: evita dividir por zero
+
   const progresso = Math.min(kmVoados / total, 1); // 0 = saindo, 1 = chegou
 
   return {
@@ -32,40 +52,148 @@ export function posicaoNaRota(origem, destino, kmVoados) {
   };
 }
 
-// Avança o voo um pouquinho (passoKm) e verifica se aconteceu algum evento.
-// "voo" guarda o trecho atual (origem → destino), quantos km já voou nele,
-// a situação ('voando' | 'desviando' | 'entregue' | 'pouso-emergencia')
-// e uma mensagem para mostrar na tela.
-export function avancarVoo(voo, passoKm, eventos, zonas) {
-  // Se o drone já pousou, nada muda
-  if (voo.situacao !== 'voando' && voo.situacao !== 'desviando') return voo;
+// Começa uma descida vertical: o drone para onde está e desce reto.
+// "situacaoFinal" e "mensagemFinal" valem quando ele tocar o chão.
+function iniciarDescida(voo, altitude, mensagem, situacaoFinal, mensagemFinal) {
+  return { ...voo, altitude, situacao: 'descendo', mensagem, situacaoFinal, mensagemFinal };
+}
 
-  const kmNovo = voo.km + passoKm;
+// Um tique da descida vertical
+function descer(voo) {
+  const passo = voo.paraquedasAberto ? VERTICAL_PARAQUEDAS_POR_PASSO_M : VERTICAL_POR_PASSO_M;
+  const altitude = Math.max(voo.altitude - passo, 0); // não passa do chão
 
-  // Pane: só vale na rota original, no momento em que o drone passa pelo km do evento
-  const pane = eventos.find(
-    (evento) => evento.tipo === 'pane' && voo.situacao === 'voando' && voo.km < evento.km && kmNovo >= evento.km
+  if (altitude === 0) {
+    return { ...voo, altitude, situacao: voo.situacaoFinal, mensagem: voo.mensagemFinal };
+  }
+  return { ...voo, altitude };
+}
+
+// Decolagem vertical: o drone sobe em cima do hub e só sai do lugar a 120 m.
+// Eventos no km 0 acontecem durante a decolagem, na altitude do evento
+// (ex.: { tipo: 'falha-grave', km: 0, altitude: 20 }) ou a 60 m.
+function decolar(voo, eventos) {
+  const altitude = Math.min(voo.altitude + VERTICAL_POR_PASSO_M, ALTITUDE_CRUZEIRO);
+
+  const evento = eventos.find((e) => {
+    const altitudeDoEvento = e.altitude ?? ALTITUDE_EVENTO_DECOLAGEM;
+    return e.km === 0 && voo.altitude < altitudeDoEvento && altitude >= altitudeDoEvento;
+  });
+
+  // Falha grave baixa demais para o paraquedas: o drone cai, mas dentro do hub,
+  // longe de ruas e pessoas. É por isso que ele sobe na vertical antes de andar.
+  if (evento && evento.tipo === 'falha-grave' && altitude < ALTITUDE_MINIMA_PARAQUEDAS) {
+    return {
+      ...voo,
+      altitude: 0,
+      situacao: 'queda',
+      mensagem: `Falha grave a ${altitude} m: sem altura para o paraquedas. Caiu dentro do hub, longe de ruas e pessoas`,
+    };
+  }
+
+  // Outros problemas na decolagem: desce de volta em cima do próprio hub
+  if (evento) {
+    const comParaquedas = evento.tipo === 'falha-grave';
+    const mensagem = comParaquedas
+      ? 'Falha grave na decolagem! Paraquedas aberto, descendo sobre o hub'
+      : 'Pane na decolagem! Descendo de volta no hub';
+    return iniciarDescida(
+      { ...voo, paraquedasAberto: comParaquedas },
+      altitude,
+      mensagem,
+      'pousou-hub',
+      'Pousou em segurança no hub da SADEC'
+    );
+  }
+
+  if (altitude === ALTITUDE_CRUZEIRO) {
+    return { ...voo, altitude, situacao: 'voando', mensagem: 'Voando...' };
+  }
+  return { ...voo, altitude };
+}
+
+// Falha grave em voo: os motores param. Abre o paraquedas e escolhe onde pousar.
+function falhaGrave(voo, evento, regiao) {
+  const local = posicaoNaRota(voo.origem, voo.destino, evento.km);
+  const pouso = escolherPouso(local, ALTITUDE_CRUZEIRO, regiao.zonas, regiao.areas, regiao.vias);
+
+  return {
+    origem: local,
+    destino: pouso.ponto,
+    km: 0,
+    situacao: 'planando',
+    emergencia: true,
+    paraquedasAberto: true,
+    altitudeInicial: ALTITUDE_CRUZEIRO,
+    alcance: pouso.alcance,
+    alcanceConfortavel: pouso.alcanceConfortavel,
+    nomePouso: pouso.nome,
+    mensagem: `Falha grave no km ${evento.km}! Paraquedas aberto, planando para ${pouso.nome}`,
+  };
+}
+
+// Chegou ao fim do trecho: em vez de descer em rampa, para e desce na vertical
+function chegarAoFim(voo, total) {
+  const chegou = { ...voo, km: total };
+
+  if (voo.situacao === 'voando') {
+    return iniciarDescida(chegou, ALTITUDE_CRUZEIRO, 'Sobre o destino: descendo na vertical', 'entregue', 'Entrega concluída!');
+  }
+
+  if (voo.situacao === 'desviando') {
+    const zona = voo.destino.id;
+    return iniciarDescida(chegou, ALTITUDE_CRUZEIRO, `Sobre a ${zona}: descendo na vertical`, 'pouso-emergencia', `Pouso seguro na ${zona}`);
+  }
+
+  // Planando: chega com a altura que sobrou e desce em espiral sobre o ponto
+  const altitudeChegada = Math.max(altitudeAoChegar(voo.altitudeInicial, total), 0);
+  const forcado = altitudeChegada < MARGEM_POUSO_M;
+  return iniciarDescida(
+    chegou,
+    altitudeChegada,
+    `Sobre o ponto de pouso a ${Math.round(altitudeChegada)} m: descendo em espiral`,
+    'pouso-paraquedas',
+    forcado ? `Pouso forçado em ${voo.nomePouso}` : `Pouso suave de paraquedas em ${voo.nomePouso}`
   );
-  if (pane) {
-    const local = posicaoNaRota(voo.origem, voo.destino, pane.km);
-    const { zona } = zonaMaisProxima(local, zonas);
+}
+
+// Avança o voo um tique (passoKm na horizontal) e verifica se aconteceu algum evento.
+// "regiao" junta os dados do mapa: { zonas, areas, vias }.
+export function avancarVoo(voo, passoKm, eventos, regiao) {
+  // Se o drone já está no chão, nada muda
+  if (!estaNoAr(voo)) return voo;
+
+  // Subindo ou descendo na vertical: o drone não sai do lugar
+  if (voo.situacao === 'decolando') return decolar(voo, eventos);
+  if (voo.situacao === 'descendo') return descer(voo);
+
+  const passo = voo.situacao === 'planando' ? passoKm * VELOCIDADE_PARAQUEDAS : passoKm;
+  const kmNovo = voo.km + passo;
+
+  // Eventos em voo só valem na rota original, no momento em que o drone passa pelo km deles
+  const evento =
+    voo.situacao === 'voando' ? eventos.find((e) => voo.km < e.km && kmNovo >= e.km) : undefined;
+
+  if (evento && evento.tipo === 'pane') {
+    const local = posicaoNaRota(voo.origem, voo.destino, evento.km);
+    const { zona } = zonaMaisProxima(local, regiao.zonas);
     return {
       origem: local,
       destino: zona,
       km: 0,
       situacao: 'desviando',
-      mensagem: `Pane no km ${pane.km}! Desviando para ${zona.id}`,
+      emergencia: true,
+      mensagem: `Pane no km ${evento.km}! Desviando para a ${zona.id}`,
     };
+  }
+
+  if (evento && evento.tipo === 'falha-grave') {
+    return falhaGrave(voo, evento, regiao);
   }
 
   // Chegou ao fim do trecho?
   const total = distanciaKm(voo.origem, voo.destino);
-  if (kmNovo >= total) {
-    if (voo.situacao === 'voando') {
-      return { ...voo, km: total, situacao: 'entregue', mensagem: 'Entrega concluída!' };
-    }
-    return { ...voo, km: total, situacao: 'pouso-emergencia', mensagem: `Pouso seguro em ${voo.destino.id}` };
-  }
+  if (kmNovo >= total) return chegarAoFim(voo, total);
 
   // Nada de especial: só anda
   return { ...voo, km: kmNovo };
