@@ -24,9 +24,10 @@ import {
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
 import {
   ANTECEDENCIA_KM,
-  DETECCAO_SENSOR_KM,
   TIPOS_OBSTACULO,
+  bolhaDe,
   criarObstaculo,
+  deteccaoDe,
   medirObstaculo,
   posicaoObstaculo,
 } from './obstaculos.js';
@@ -77,12 +78,26 @@ const DISTANCIA_MAXIMA_CRITICA_KM = 1; // em temperatura crítica, só vai a uma
 const POTENCIA_MAXIMA = 1.5; // no desvio, anda 1,5 vez mais rápido
 const CONSUMO_DESVIO = 2; // e gasta o dobro por segundo
 const HORIZONTE_PREVISAO_S = 60; // só se preocupa com aproximações nos próximos 60 s
+const FOLGA_IMPREVISIVEL_KM = 0.1; // com um drone que muda de rumo, 100 m a mais de margem
+// Histerese: para COMEÇAR a desviar, basta a previsão entrar na bolha; para PARAR,
+// a previsão precisa ficar 50% além da bolha. Sem isso, o drone "raspa" na borda
+// (para de desviar, volta para a rota, encosta na bolha, desvia de novo...).
+const HISTERESE = 1.5;
 const VELOCIDADE_DRONE_KM_S = 0.015; // 15 m/s
 
 // Bateria: quantos segundos de verdade cada tique representa nas fases paradas.
 // (Andando, o tique é o tempo de voar o pedaço do caminho: 0,05 km a 15 m/s ≈ 3,3 s.)
 const SEGUNDOS_TIQUE_VERTICAL = 1; // subindo ou descendo 3 m por tique, a 3 m/s
 const SEGUNDOS_TIQUE_PAIRANDO = 5; // parado no ar, cada tique vale 5 s (para a espera não demorar na tela)
+
+// Os valores "por tique" acima valem para um passo de 0,05 km. Se o passo for menor
+// (o drone decidindo mais vezes, com mais precisão), tudo é proporcional: com metade
+// do passo, sobe metade dos metros e passa metade do tempo. Assim a duração das fases
+// na tela não muda, só a precisão.
+const PASSO_REFERENCIA_KM = 0.05;
+function fatorDoPasso(passoKm) {
+  return passoKm / PASSO_REFERENCIA_KM;
+}
 
 const NO_AR = ['decolando', 'voando', 'afastando', 'desviando', 'motor-fraco', 'sem-gps', 'planando', 'descendo'];
 
@@ -152,8 +167,8 @@ function continuar(voo) {
 
 // Quantos segundos de verdade este tique representa
 function segundosDoTique(voo, passoKm) {
-  if (voo.situacao === 'decolando' || voo.situacao === 'descendo') return SEGUNDOS_TIQUE_VERTICAL;
-  if (voo.situacao === 'sem-gps') return SEGUNDOS_TIQUE_PAIRANDO;
+  if (voo.situacao === 'decolando' || voo.situacao === 'descendo') return SEGUNDOS_TIQUE_VERTICAL * fatorDoPasso(passoKm);
+  if (voo.situacao === 'sem-gps') return SEGUNDOS_TIQUE_PAIRANDO * fatorDoPasso(passoKm);
   return passoKm / VELOCIDADE_CRUZEIRO_KM_S; // andando: o tempo de voar o pedaço (≈ 3,3 s)
 }
 
@@ -192,8 +207,8 @@ function iniciarDescida(voo, altitude, mensagem, situacaoFinal, mensagemFinal) {
 }
 
 // Um tique da descida vertical
-function descer(voo) {
-  const passo = voo.paraquedasAberto ? VERTICAL_PARAQUEDAS_POR_PASSO_M : VERTICAL_POR_PASSO_M;
+function descer(voo, passoKm) {
+  const passo = (voo.paraquedasAberto ? VERTICAL_PARAQUEDAS_POR_PASSO_M : VERTICAL_POR_PASSO_M) * fatorDoPasso(passoKm);
   const altitude = Math.max(voo.altitude - passo, 0); // não passa do chão
 
   if (altitude === 0) {
@@ -207,8 +222,8 @@ function descer(voo) {
 // Decolagem vertical: o drone sobe em cima do hub e só sai do lugar a 120 m.
 // Eventos no km 0 acontecem durante a decolagem, na altitude do evento
 // (ex.: { tipo: 'falha-grave', km: 0, altitude: 20 }) ou a 60 m.
-function decolar(voo, eventos) {
-  const altitude = Math.min(voo.altitude + VERTICAL_POR_PASSO_M, ALTITUDE_CRUZEIRO);
+function decolar(voo, eventos, passoKm) {
+  const altitude = Math.min(voo.altitude + VERTICAL_POR_PASSO_M * fatorDoPasso(passoKm), ALTITUDE_CRUZEIRO);
 
   // O vento não é um problema na decolagem: ele só passa a valer quando o drone começa a andar
   const evento = eventos.find((e) => {
@@ -620,7 +635,7 @@ function ameacaMaisUrgente(voo) {
     // 1. O sensor mede o ponto mais perigoso do obstáculo, agora e 1 segundo antes
     const { agora, antes } = medirObstaculo(obstaculo, voo.tempo, local);
     const distancia = distanciaKm(local, agora);
-    if (distancia > DETECCAO_SENSOR_KM) continue; // o sensor ainda não enxerga
+    if (distancia > deteccaoDe(obstaculo)) continue; // o sensor ainda não enxerga
 
     // A velocidade é quanto esse ponto andou no último segundo
     const velocidadeObstaculo = { x: agora.x - antes.x, y: agora.y - antes.y };
@@ -635,9 +650,29 @@ function ameacaMaisUrgente(voo) {
 
     // Outro drone com acordo de que ELE desvia: confiamos no combinado e seguimos reto,
     // mas continuamos vigiando: se ele entrar na nossa bolha, reagimos mesmo assim
-    const bolha = TIPOS_OBSTACULO[obstaculo.tipo].bolhaKm;
-    const eleDesvia = obstaculo.tipo === 'drone' && obstaculo.acordo && obstaculo.acordo.desvia !== ID_NOSSO_DRONE;
+    let bolha = bolhaDe(obstaculo);
+    const eleDesvia = obstaculo.tipo === 'drone' && obstaculo.acordo && obstaculo.acordo.desvia === obstaculo.id;
     if (eleDesvia && distancia > bolha) continue;
+
+    // Os dois sem rádio: o outro CONTA que nós também vamos desviar pela direita.
+    // Por isso não basta "ele já está desviando": usamos uma bolha bem maior e desviamos também.
+    if (obstaculo.tipo === 'drone' && obstaculo.regraDoAr) bolha = bolha + TIPOS_OBSTACULO.drone.desvioKm;
+
+    // Drone sem rádio mudando de rumo: a previsão em linha reta envelhece rápido (ele anda
+    // em zigue-zague). Pensando no pior caso, somamos uma folga à bolha e, além da previsão,
+    // usamos uma regra de distância: perto demais E se aproximando = continua se afastando.
+    const imprevisivel = obstaculo.tipo === 'drone' && obstaculo.comportamento === 'errante';
+    if (imprevisivel) bolha = bolha + FOLGA_IMPREVISIVEL_KM;
+
+    // Já desviando? Só para quando houver folga de verdade (histerese)
+    if (voo.desviandoObstaculo) bolha = bolha * HISTERESE;
+
+    // Regra de distância (só para os imprevisíveis): perto demais e chegando mais perto
+    const seAproximando = r.x * v.x + r.y * v.y < 0;
+    if (imprevisivel && distancia < bolha && seAproximando && (!maisUrgente || 0 < maisUrgente.t)) {
+      maisUrgente = { obstaculo, t: 0, futuro: r, distancia, direcao };
+      continue;
+    }
 
     // 3. Vai entrar na bolha nos próximos 60 s? É uma ameaça. Fica com a mais próxima no tempo.
     if (t <= HORIZONTE_PREVISAO_S && menorDistancia < bolha && (!maisUrgente || t < maisUrgente.t)) {
@@ -657,14 +692,24 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
   const frente = fuga.x * direcao.x + fuga.y * direcao.y;
   fuga = { x: fuga.x - frente * direcao.x, y: fuga.y - frente * direcao.y };
   let tamanho = Math.sqrt(fuga.x ** 2 + fuga.y ** 2);
-  // De frente, bem no meio, ou outro drone (como combinado): vai pela direita (regra do ar)
-  if (tamanho < 1e-6 || ameaca.obstaculo.tipo === 'drone') {
+  // Vai pela direita (regra do ar) quando: está bem de frente (sem lado melhor), quando
+  // combinou com o outro drone, ou quando os dois estão sem rádio. O outro CONTA com isso.
+  // Com um drone sem rádio imprevisível, foge para longe de onde ele vai estar.
+  const combinado = ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.comunicacao;
+  const regraDoAr = ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.regraDoAr;
+  if (tamanho < 1e-6 || combinado || regraDoAr) {
     fuga = { x: -direcao.y, y: direcao.x };
     tamanho = 1;
   }
 
   // Mistura: um pouco para frente + bastante de lado
-  const movimento = { x: direcao.x * 0.3 + fuga.x / tamanho, y: direcao.y * 0.3 + fuga.y / tamanho };
+  let movimento = { x: direcao.x * 0.3 + fuga.x / tamanho, y: direcao.y * 0.3 + fuga.y / tamanho };
+
+  // Drone imprevisível (zigue-zague): ir só para o lado não basta, porque ele pode ir
+  // para o mesmo lado. O mais seguro é se AFASTAR dele de verdade, até recuando.
+  if (ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.comportamento === 'errante') {
+    movimento = { x: -ameaca.futuro.x, y: -ameaca.futuro.y };
+  }
   const tamanhoMovimento = Math.sqrt(movimento.x ** 2 + movimento.y ** 2);
   const passo = passoKm * POTENCIA_MAXIMA;
   const novo = {
@@ -673,10 +718,11 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
   };
 
   const nome = TIPOS_OBSTACULO[ameaca.obstaculo.tipo].nome;
-  const mensagem =
-    ameaca.obstaculo.tipo === 'drone'
-      ? `Desviando pela direita do ${ameaca.obstaculo.id}, como combinado (${Math.round(ameaca.distancia * 1000)} m)`
-      : `${nome} a ${Math.round(ameaca.distancia * 1000)} m! Desvio com potência máxima`;
+  const metros = Math.round(ameaca.distancia * 1000);
+  let mensagem = `${nome} a ${metros} m! Desvio com potência máxima`;
+  if (combinado) mensagem = `Desviando pela direita do ${ameaca.obstaculo.id}, como combinado (${metros} m)`;
+  else if (regraDoAr) mensagem = `Regra do ar: desviando pela direita (${metros} m)`;
+  else if (ameaca.obstaculo.tipo === 'drone') mensagem = `Drone sem rádio a ${metros} m! Nós desviamos, com potência máxima`;
   return {
     ...voo,
     origem: novo, // o trecho recomeça de onde o drone foi parar, rumo ao mesmo alvo
@@ -711,6 +757,25 @@ function negociar(voo, outro) {
     obstaculos,
     mensagem: `Drone ${outro.id} a ${Math.round(DETECCAO_RADIO_KM * 1000)} m. Conversa pelo rádio... Acordo: ${decisao}`,
   };
+}
+
+// Drone SEM rádio detectado pelos sensores: não dá para conversar.
+// Se só ele está sem rádio, o nosso drone assume o desvio (mesmo levando um órgão),
+// porque o outro não pode garantir nada. Se os dois estão sem rádio, vale a regra do ar:
+// cada um desvia pela própria direita, e assim os lados nunca coincidem.
+const NOMES_COMPORTAMENTO = { reto: 'vindo de frente', pairando: 'parado no ar', errante: 'mudando de rumo' };
+
+function detectarSemRadio(voo, outro) {
+  const desvia = outro.regraDoAr ? 'ambos' : ID_NOSSO_DRONE;
+  const obstaculos = voo.obstaculos.map((o) => (o === outro ? { ...o, acordo: { desvia, tempo: voo.tempo } } : o));
+  const metros = Math.round(outro.deteccaoKm * 1000);
+  const como = NOMES_COMPORTAMENTO[outro.comportamento];
+  const gps = outro.semGps ? ', sem GPS (bolha maior)' : '';
+
+  const mensagem = outro.regraDoAr
+    ? `Drone sem rádio a ${metros} m, e nós também sem rádio! Regra do ar: cada um desvia pela própria direita`
+    : `Drone sem rádio a ${metros} m (${como}${gps})! Sem conversa possível: nós desviamos`;
+  return { ...voo, obstaculos, mensagem };
 }
 
 // ---------- Eventos ----------
@@ -864,8 +929,8 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   }
 
   // Subindo ou descendo na vertical: o drone não sai do lugar
-  if (voo.situacao === 'decolando') return decolar(voo, eventos);
-  if (voo.situacao === 'descendo') return descer(voo);
+  if (voo.situacao === 'decolando') return decolar(voo, eventos, passoKm);
+  if (voo.situacao === 'descendo') return descer(voo, passoKm);
 
   // Sem GPS: parado no ar, tentando recuperar o sinal
   if (voo.situacao === 'sem-gps') return pairarSemGps(voo, regiao);
@@ -908,8 +973,24 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
     );
     if (semAcordo) return negociar(voo, semAcordo);
 
+    // Drone sem rádio que os sensores acabaram de enxergar
+    const semRadio = voo.obstaculos.find(
+      (o) =>
+        o.tipo === 'drone' &&
+        !o.comunicacao &&
+        !o.acordo &&
+        distanciaKm(local, posicaoObstaculo(o, voo.tempo)) <= o.deteccaoKm
+    );
+    // A detecção não pode custar um tique: o drone já começa a desviar no mesmo instante
+    if (semRadio) voo = detectarSemRadio(voo, semRadio);
+
     const ameaca = ameacaMaisUrgente(voo);
-    if (ameaca) return desviarDeObstaculo(voo, ameaca, passoKm);
+    if (ameaca) {
+      const desviou = desviarDeObstaculo(voo, ameaca, passoKm);
+      // No instante da detecção, mostra o aviso de detecção (o desvio já começou)
+      return semRadio ? { ...desviou, mensagem: voo.mensagem } : desviou;
+    }
+    if (semRadio) return voo; // detectou, mas ainda não há rota de colisão
 
     // O perigo passou: refaz a conta da bateria, porque o desvio gastou mais
     if (voo.desviandoObstaculo) {

@@ -211,16 +211,19 @@ function Obstaculo({ obstaculo, s }) {
   const x = obstaculo.posicao.x * ESCALA;
   const y = obstaculo.posicao.y * ESCALA;
 
-  // Outro drone: o mesmo desenho do nosso, em roxo, com o nome e a prioridade
+  // Outro drone: o mesmo desenho do nosso, em roxo (da rede) ou cinza (sem rádio)
   if (obstaculo.tipo === 'drone') {
     const braco = 1.8 * s;
+    const cor = obstaculo.semComunicacao ? '#555555' : '#5E2B85';
+    const clara = obstaculo.semComunicacao ? '#DDDDDD' : '#E9D8F5';
+    const bolha = obstaculo.semComunicacao ? '#D32F2F' : '#8E5AB5';
     return (
       <G>
-        <Circle cx={x} cy={y} r={obstaculo.bolhaKm * ESCALA} fill="#8E5AB5" fillOpacity="0.1" stroke="#8E5AB5" strokeWidth={0.3 * s} strokeDasharray={tracejado([0.8, 0.8], s)} />
-        <Line x1={x - braco} y1={y - braco} x2={x + braco} y2={y + braco} stroke="#5E2B85" strokeWidth={0.5 * s} />
-        <Line x1={x - braco} y1={y + braco} x2={x + braco} y2={y - braco} stroke="#5E2B85" strokeWidth={0.5 * s} />
+        <Circle cx={x} cy={y} r={obstaculo.bolhaKm * ESCALA} fill={bolha} fillOpacity="0.1" stroke={bolha} strokeWidth={0.3 * s} strokeDasharray={tracejado([0.8, 0.8], s)} />
+        <Line x1={x - braco} y1={y - braco} x2={x + braco} y2={y + braco} stroke={cor} strokeWidth={0.5 * s} />
+        <Line x1={x - braco} y1={y + braco} x2={x + braco} y2={y - braco} stroke={cor} strokeWidth={0.5 * s} />
         {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([dx, dy]) => (
-          <Circle key={`${dx},${dy}`} cx={x + dx * braco} cy={y + dy * braco} r={0.9 * s} fill="#E9D8F5" stroke="#5E2B85" strokeWidth={0.35 * s} />
+          <Circle key={`${dx},${dy}`} cx={x + dx * braco} cy={y + dy * braco} r={0.9 * s} fill={clara} stroke={cor} strokeWidth={0.35 * s} />
         ))}
         <Rotulo x={x} y={y - 3.5 * s} texto={obstaculo.rotulo} tamanho={2} s={s} />
       </G>

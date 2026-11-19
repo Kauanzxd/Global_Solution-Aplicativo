@@ -18,6 +18,13 @@ export const TIPOS_OBSTACULO = {
   drone: { nome: 'Drone', bolhaKm: 0.1, velocidadeKmS: 0.015, desvioKm: 0.3, rampaS: 8 },
 };
 
+// Drone SEM comunicação (não cooperativo): não dá para conversar com ele.
+// Só os sensores o enxergam (câmera e radar, mais perto que o rádio) e, como não
+// sabemos o que ele vai fazer, a bolha de segurança é maior.
+export const DETECCAO_SEM_RADIO_KM = 0.25; // sensores: 250 m (o rádio ouviria a 500 m)
+const BOLHA_SEM_RADIO_KM = 0.15; // bolha maior que a de um drone cooperativo (100 m)
+const ERRO_GPS_DELE_KM = 0.05; // se ele está sem GPS, a posição que ele transmite tem erro
+
 // Cria o obstáculo à frente do drone, na rota, de um jeito que ele CRUZE o caminho
 // justamente quando o drone chegar lá (é o pior caso, o que testa o desvio).
 // "local": onde o drone está | "direcao": para onde ele vai (vetor de tamanho 1)
@@ -29,12 +36,21 @@ export function criarObstaculo(evento, local, direcao, tempoAgora) {
   // Outro drone: vem de frente pela rota e passa pelo ponto de encontro junto com o nosso
   if (evento.tipo === 'drone') {
     const tipo = TIPOS_OBSTACULO.drone;
+    const comunicacao = evento.comunicacao !== false;
+    const semGps = evento.semGps === true;
     return {
       tipo: 'drone',
       id: evento.id ?? 'SADEC-07',
       prioridade: evento.prioridade ?? 'comercial',
       bateria: evento.bateria ?? 60,
-      comunicacao: evento.comunicacao !== false,
+      comunicacao,
+      // Sem comunicação: o que ele está fazendo ('reto', 'pairando' ou 'errante')
+      comportamento: evento.comportamento ?? 'reto',
+      semGps,
+      // Os dois sem rádio: ele também segue a regra do ar (desvia pela própria direita)
+      regraDoAr: !comunicacao && evento.ambosSemRadio === true,
+      deteccaoKm: comunicacao ? DETECCAO_SENSOR_KM : DETECCAO_SEM_RADIO_KM,
+      bolhaKm: comunicacao ? tipo.bolhaKm : BOLHA_SEM_RADIO_KM + (semGps ? ERRO_GPS_DELE_KM : 0),
       pontoNaRota,
       velocidade: { x: -direcao.x * tipo.velocidadeKmS, y: -direcao.y * tipo.velocidadeKmS },
       direita: { x: direcao.y, y: -direcao.x }, // a direita DELE (ele vem no sentido contrário)
@@ -69,7 +85,8 @@ export function criarObstaculo(evento, local, direcao, tempoAgora) {
 // Quanto o OUTRO drone está desviado para a direita dele (em km), se o acordo
 // disse que é ele quem desvia: vai para o lado aos poucos, passa, e volta para a rota
 function desvioDoOutroDrone(obstaculo, tempo) {
-  if (!obstaculo.acordo || obstaculo.acordo.desvia !== obstaculo.id) return 0;
+  const eleDesvia = obstaculo.acordo && (obstaculo.acordo.desvia === obstaculo.id || obstaculo.acordo.desvia === 'ambos');
+  if (!eleDesvia) return 0;
   const tipo = TIPOS_OBSTACULO.drone;
   const indo = (tempo - obstaculo.acordo.tempo) / tipo.rampaS; // 0 → 1 depois do acordo
   const voltando = (obstaculo.chegada + 15 - tempo) / tipo.rampaS; // 1 → 0 depois de passar
@@ -82,10 +99,19 @@ export function posicaoObstaculo(obstaculo, tempo) {
   const dt = tempo - obstaculo.chegada; // negativo = antes de cruzar a rota
 
   if (obstaculo.tipo === 'drone') {
-    const lado = desvioDoOutroDrone(obstaculo, tempo);
+    let andou = dt; // quanto tempo ele andou na direção dele
+    let lado = desvioDoOutroDrone(obstaculo, tempo); // quanto ele está para a direita dele
+
+    if (obstaculo.comportamento === 'pairando') andou = 0; // parado no ar, em cima da rota
+    if (obstaculo.comportamento === 'errante') {
+      // Sem rumo certo (ex.: saindo de uma área proibida): anda devagar e muda de lado
+      andou = dt * 0.5;
+      lado += Math.sin(tempo / 4) * 0.12;
+    }
+
     return {
-      x: obstaculo.pontoNaRota.x + obstaculo.velocidade.x * dt + obstaculo.direita.x * lado,
-      y: obstaculo.pontoNaRota.y + obstaculo.velocidade.y * dt + obstaculo.direita.y * lado,
+      x: obstaculo.pontoNaRota.x + obstaculo.velocidade.x * andou + obstaculo.direita.x * lado,
+      y: obstaculo.pontoNaRota.y + obstaculo.velocidade.y * andou + obstaculo.direita.y * lado,
     };
   }
 
@@ -147,15 +173,26 @@ export function algumObstaculoPerto(obstaculos, tempo, ponto, raioKm) {
 
 // Dados para o mapa desenhar: posição do perigo, a bolha e, no guindaste, a base e a ponta do braço
 export function desenhoObstaculo(obstaculo, tempo) {
-  const tipo = TIPOS_OBSTACULO[obstaculo.tipo];
-  const desenho = { tipo: obstaculo.tipo, posicao: posicaoObstaculo(obstaculo, tempo), bolhaKm: tipo.bolhaKm };
+  const desenho = { tipo: obstaculo.tipo, posicao: posicaoObstaculo(obstaculo, tempo), bolhaKm: bolhaDe(obstaculo) };
 
   if (obstaculo.tipo === 'guindaste') {
     desenho.base = obstaculo.base;
     desenho.ponta = pontaDoBraco(obstaculo, tempo);
   }
   if (obstaculo.tipo === 'drone') {
-    desenho.rotulo = `${obstaculo.id} · ${PRIORIDADES[obstaculo.prioridade].nome}`;
+    desenho.rotulo = obstaculo.comunicacao
+      ? `${obstaculo.id} · ${PRIORIDADES[obstaculo.prioridade].nome}`
+      : `sem rádio${obstaculo.semGps ? ' · sem GPS' : ''}`;
+    desenho.semComunicacao = !obstaculo.comunicacao;
   }
   return desenho;
+}
+
+// Tamanho da bolha de segurança e alcance da detecção de cada obstáculo
+export function bolhaDe(obstaculo) {
+  return obstaculo.bolhaKm ?? TIPOS_OBSTACULO[obstaculo.tipo].bolhaKm;
+}
+
+export function deteccaoDe(obstaculo) {
+  return obstaculo.deteccaoKm ?? DETECCAO_SENSOR_KM;
 }

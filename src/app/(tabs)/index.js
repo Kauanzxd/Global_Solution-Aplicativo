@@ -27,7 +27,9 @@ const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS };
 // Outro drone da rede vindo de frente: { tipo: 'drone', km: 2.5, prioridade: 'comercial' }
 // (prioridade: orgaos, emergencia, saude ou comercial; opcionais: bateria, id)
 const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-const EVENTOS = [{ tipo: 'drone', km: 2.5, prioridade: 'comercial' }];
+// Drone SEM rádio: { tipo: 'drone', km: 2.5, comunicacao: false, comportamento: 'errante' }
+// (comportamento: 'reto', 'pairando' ou 'errante'; opcionais: semGps: true, ambosSemRadio: true)
+const EVENTOS = [{ tipo: 'drone', km: 2.5, comunicacao: false, comportamento: 'errante', semGps: true }];
 const PRIORIDADE = 'saude'; // tipo da nossa missão — no passo 4, quem escolhe é o usuário
 const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
 
@@ -40,6 +42,9 @@ const RAIO_ZOOM_KM = 1;
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
 const PASSO_KM = KM_POR_SEGUNDO * (PASSO_MS / 1000);
+// A cada atualização da tela, o drone toma 4 decisões (passos 4 vezes menores).
+// Ele reage mais rápido, o que faz diferença contra obstáculos imprevisíveis.
+const DECISOES_POR_TIQUE = 4;
 
 // Aba "Simular" (rota "/"): aqui vai ficar o simulador de voo.
 export default function Simular() {
@@ -60,7 +65,13 @@ export default function Simular() {
     if (!emVoo) return; // pousou: não liga o relógio
 
     const relogio = setInterval(() => {
-      setVoo((atual) => avancarVoo(atual, PASSO_KM, EVENTOS, REGIAO));
+      setVoo((atual) => {
+        let proximo = atual;
+        for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
+          proximo = avancarVoo(proximo, PASSO_KM / DECISOES_POR_TIQUE, EVENTOS, REGIAO);
+        }
+        return proximo;
+      });
     }, PASSO_MS);
 
     // Quando o drone pousa (ou a tela fecha), desliga o relógio
