@@ -1,6 +1,24 @@
 // Regras do voo do drone. Só contas, sem desenho.
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
 
+export const ALTITUDE_CRUZEIRO = 120; // metros: teto comum para drones no Brasil
+const RAMPA_KM = 0.4; // distância que o drone usa para subir (ou para descer)
+
+// Altitude do drone, em metros, no ponto atual do trecho.
+// Ele sobe no começo da rota, voa a 120 m e desce no fim do trecho.
+export function altitudeDoVoo(voo) {
+  const total = distanciaKm(voo.origem, voo.destino);
+
+  // Só a rota original começa no chão (no hub); o desvio já começa no ar
+  const comecouNoChao = voo.situacao === 'voando' || voo.situacao === 'entregue';
+
+  // Fatores de 0 a 1: 0 = no chão, 1 = altitude de cruzeiro
+  const fatorSubida = comecouNoChao ? Math.min(voo.km / RAMPA_KM, 1) : 1;
+  const fatorDescida = Math.min((total - voo.km) / RAMPA_KM, 1);
+
+  return Math.round(ALTITUDE_CRUZEIRO * Math.min(fatorSubida, fatorDescida));
+}
+
 // Onde o drone está depois de voar "kmVoados" na reta da origem até o destino.
 // Usamos km (e não porcentagem) porque os eventos vão acontecer em km
 // específicos, como "pane no km 1,5".

@@ -99,14 +99,18 @@ function ZonaPouso({ zona }) {
   );
 }
 
-// O drone visto de cima: dois braços em "X" com uma hélice em cada ponta
-function Drone({ x, y }) {
+// O drone visto de cima: dois braços em "X" com uma hélice em cada ponta.
+// A altitude aparece de dois jeitos: o número em metros acima do drone e uma
+// sombra no chão que se afasta dele quanto mais alto ele está.
+function Drone({ x, y, altitude }) {
   const cx = x * ESCALA;
   const cy = y * ESCALA;
   const braco = 2.2;
+  const afastamentoSombra = (altitude / 120) * 2.5; // 0 no chão, 2,5 a 120 m
 
   return (
     <G>
+      <Circle cx={cx + afastamentoSombra} cy={cy + afastamentoSombra} r="2.4" fill="#000000" opacity="0.2" />
       <Line x1={cx - braco} y1={cy - braco} x2={cx + braco} y2={cy + braco} stroke="#0B1F33" strokeWidth="0.6" />
       <Line x1={cx - braco} y1={cy + braco} x2={cx + braco} y2={cy - braco} stroke="#0B1F33" strokeWidth="0.6" />
       <Circle cx={cx - braco} cy={cy - braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
@@ -114,6 +118,7 @@ function Drone({ x, y }) {
       <Circle cx={cx - braco} cy={cy + braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
       <Circle cx={cx + braco} cy={cy + braco} r="1.1" fill="#FFFFFF" stroke="#0B1F33" strokeWidth="0.4" />
       <Circle cx={cx} cy={cy} r="1.0" fill="#0B1F33" />
+      <Rotulo x={cx} y={cy - 4} texto={`${altitude} m`} tamanho="2.4" />
     </G>
   );
 }
@@ -121,7 +126,8 @@ function Drone({ x, y }) {
 // "destino" é o local para onde o drone vai (um item de LOCAIS)
 // "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
 // "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
-export default function Mapa({ destino, drone, desvio }) {
+// "altitude" é a altura do drone em metros (0 = no chão)
+export default function Mapa({ destino, drone, desvio, altitude = 0 }) {
   const hub = LOCAIS.find((local) => local.id === 'hub');
   const posicaoDrone = drone || hub;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -242,7 +248,7 @@ export default function Mapa({ destino, drone, desvio }) {
         ))}
 
         {/* 11. Drone: por último de tudo, para ficar por cima */}
-        <Drone x={posicaoDrone.x} y={posicaoDrone.y} />
+        <Drone x={posicaoDrone.x} y={posicaoDrone.y} altitude={altitude} />
       </Svg>
     </View>
   );

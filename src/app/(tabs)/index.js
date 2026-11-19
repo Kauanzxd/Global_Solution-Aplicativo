@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Cabecalho from '../../componentes/Cabecalho';
 import Mapa from '../../componentes/Mapa';
 import { LOCAIS, ZONAS_POUSO } from '../../dados/regiao';
-import { avancarVoo, posicaoNaRota } from '../../regras/voo';
+import { altitudeDoVoo, avancarVoo, posicaoNaRota } from '../../regras/voo';
 
 const hub = LOCAIS.find((local) => local.id === 'hub');
 
@@ -33,13 +33,14 @@ export default function Simular() {
   }, [emVoo]);
 
   const posicao = posicaoNaRota(voo.origem, voo.destino, voo.km);
+  const altitude = altitudeDoVoo(voo);
   const desvio = voo.situacao === 'desviando' || voo.situacao === 'pouso-emergencia' ? voo : null;
 
   return (
     <View style={styles.container}>
       <Cabecalho titulo="Simular voo" subtitulo="Monte uma situação e veja o drone em ação" />
       <View style={styles.areaMapa}>
-        <Mapa destino={destino} drone={posicao} desvio={desvio} />
+        <Mapa destino={destino} drone={posicao} desvio={desvio} altitude={altitude} />
       </View>
       <Text style={styles.status}>{voo.mensagem}</Text>
     </View>
