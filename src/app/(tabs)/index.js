@@ -11,6 +11,7 @@ import { AREAS, LOCAIS, VIAS, ZONAS_POUSO } from '../../dados/regiao';
 import { verificarDecolagem } from '../../regras/bateria';
 import { distanciaKm } from '../../regras/distancia';
 import { algumObstaculoPerto, desenhoObstaculo } from '../../regras/obstaculos';
+import { tipoDoEvento } from '../../dados/tiposEventos';
 import { riscoNoPonto } from '../../regras/risco';
 import { altitudeDoVoo, avancarVoo, estaNoAr, incertezaDoVoo, posicaoNaRota } from '../../regras/voo';
 
@@ -63,6 +64,36 @@ function problemaDoDestino(destino) {
     return 'O destino fica sobre uma rodovia ou trilho: não dá para pousar ali. Escolha outro ponto.';
   }
   return null;
+}
+
+// Onde cada evento planejado fica no mapa. Na ida, o km conta a partir do hub;
+// na volta, a partir do destino, no caminho de volta ao hub.
+// Ida e volta usam a mesma linha, então cada marcador é empurrado um pouco para a
+// DIREITA do sentido do voo: ficam duas "faixas", como uma estrada de mão dupla.
+const AFASTAMENTO_FAIXA_KM = 0.25;
+
+function marcadoresDosEventos(eventos, destino, distanciaIda) {
+  if (distanciaIda === 0) return [];
+  // Direção da ida (tamanho 1) e a direita dela (girada 90°)
+  const ida = { x: (destino.x - hub.x) / distanciaIda, y: (destino.y - hub.y) / distanciaIda };
+  const direitaDaIda = { x: -ida.y, y: ida.x };
+
+  return eventos
+    .map((evento, indice) => {
+      if (evento.km > distanciaIda * 2) return null; // fora da rota
+      const naIda = evento.km <= distanciaIda;
+      const ponto = naIda
+        ? posicaoNaRota(hub, destino, evento.km)
+        : posicaoNaRota(destino, hub, evento.km - distanciaIda);
+      const lado = naIda ? 1 : -1; // na volta, a direita do drone é o outro lado da linha
+      return {
+        x: ponto.x + direitaDaIda.x * AFASTAMENTO_FAIXA_KM * lado,
+        y: ponto.y + direitaDaIda.y * AFASTAMENTO_FAIXA_KM * lado,
+        cor: tipoDoEvento(evento.tipo).cor,
+        numero: indice + 1,
+      };
+    })
+    .filter((marcador) => marcador !== null);
 }
 
 // Um voo novo, parado no hub, pronto para decolar, com as escolhas do usuário
@@ -164,6 +195,7 @@ export default function Simular() {
           incerteza={voo ? incertezaDoVoo(voo) : 0}
           obstaculos={voo ? (voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo)) : []}
           vista={vista}
+          marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, configuracao.destino, distanciaIda) : []}
           aoTocar={voo === null ? (ponto) => mudar('destino', { id: 'ponto-livre', rotulo: 'Ponto no mapa', ...ponto }) : undefined}
         />
       </View>

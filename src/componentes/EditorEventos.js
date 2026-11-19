@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { TIPOS_EVENTO } from '../dados/tiposEventos';
 import CartaoEvento from './CartaoEvento';
+import LinhaDoTempo from './LinhaDoTempo';
 import { TEMA } from './tema';
 
 // Cada evento ganha um número único (id), para o React saber qual cartão é qual
@@ -28,14 +29,17 @@ export default function EditorEventos({ eventos, distanciaIda, aoMudar }) {
 
   return (
     <View>
+      <LinhaDoTempo eventos={eventos} distanciaIda={distanciaIda} />
+
       {eventos.length === 0 ? (
         <Text style={styles.vazio}>Nenhum evento: o drone faz a missão sem imprevistos.</Text>
       ) : null}
 
-      {eventos.map((evento) => (
+      {eventos.map((evento, indice) => (
         <CartaoEvento
           key={evento.id}
           evento={evento}
+          numero={indice + 1}
           distanciaIda={distanciaIda}
           aoMudar={(campo, valor) => mudarEvento(evento.id, campo, valor)}
           aoRemover={() => remover(evento.id)}

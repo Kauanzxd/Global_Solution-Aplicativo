@@ -33,7 +33,8 @@ function Linha({ rotulo, children }) {
 
 // O cartão de UM evento: cabeçalho (nome, etapa, remover), km e as opções do tipo.
 // "aoMudar(campo, valor)" muda um campo do evento; "aoRemover()" tira o evento da lista.
-export default function CartaoEvento({ evento, distanciaIda, aoMudar, aoRemover }) {
+// "numero": a posição do evento na lista (1, 2, 3...), o mesmo número que aparece no mapa
+export default function CartaoEvento({ evento, numero, distanciaIda, aoMudar, aoRemover }) {
   const tipo = tipoDoEvento(evento.tipo);
   const etapa = etapaDoKm(evento.km, distanciaIda);
   const kmMaximo = Number((distanciaIda * 2).toFixed(1)); // ida + volta
@@ -41,6 +42,9 @@ export default function CartaoEvento({ evento, distanciaIda, aoMudar, aoRemover 
   return (
     <View style={[styles.cartao, { borderLeftColor: tipo.cor }]}>
       <View style={styles.cabecalho}>
+        <View style={[styles.numero, { backgroundColor: tipo.cor }]}>
+          <Text style={styles.textoNumero}>{numero}</Text>
+        </View>
         <Text style={styles.nome}>{tipo.rotulo}</Text>
         <Text style={[styles.etapa, { color: etapa.cor, borderColor: etapa.cor }]}>{etapa.texto}</Text>
         <Pressable onPress={aoRemover} hitSlop={10} style={styles.remover}>
@@ -132,6 +136,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  numero: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textoNumero: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   nome: {
     fontSize: 16,

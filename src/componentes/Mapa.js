@@ -341,6 +341,20 @@ function MarcadorDestino({ destino, s }) {
   );
 }
 
+// Marcador de um evento planejado na rota: bolinha colorida com o número do evento
+function MarcadorEvento({ marcador, s }) {
+  const x = marcador.x * ESCALA;
+  const y = marcador.y * ESCALA;
+  return (
+    <G>
+      <Circle cx={x} cy={y} r={1.7 * s} fill={marcador.cor} stroke="#FFFFFF" strokeWidth={0.45 * s} />
+      <Text x={x} y={y + 0.65 * s} fontSize={1.8 * s} fontWeight="bold" fill="#FFFFFF" textAnchor="middle">
+        {marcador.numero}
+      </Text>
+    </G>
+  );
+}
+
 // "destino" é o local para onde o drone vai (um item de LOCAIS ou um ponto livre)
 // "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
 // "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
@@ -352,7 +366,9 @@ function MarcadorDestino({ destino, s }) {
 // "obstaculos" (opcional): lista de obstáculos em movimento para desenhar
 // "vista" (opcional): tamanho do pedaço do mapa na tela (100 = inteiro), centrado no drone
 // "aoTocar" (opcional): função chamada com o ponto { x, y } em km onde o usuário tocou
+// "marcadores" (opcional): eventos planejados [{ x, y, cor, numero }], desenhados na rota
 export default function Mapa({
+  marcadores = [],
   destino,
   drone,
   desvio,
@@ -541,6 +557,11 @@ export default function Mapa({
 
         {/* Destino livre (escolhido tocando no mapa) */}
         {destinoLivre && <MarcadorDestino destino={destino} s={s} />}
+
+        {/* Eventos planejados: onde cada um vai acontecer na rota */}
+        {marcadores.map((marcador) => (
+          <MarcadorEvento key={marcador.numero} marcador={marcador} s={s} />
+        ))}
 
         {/* 11. Drone: por último de tudo, para ficar por cima */}
         <Drone
