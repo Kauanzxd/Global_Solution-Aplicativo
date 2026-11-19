@@ -1,13 +1,19 @@
 // Regras do voo do drone. Só contas, sem desenho.
 //
 // Fases do voo (voo.situacao):
-//   'decolando'  sobe na vertical em cima do hub até 120 m
-//   'voando'     vai do hub até o destino a 120 m
-//   'desviando'  depois de uma pane, vai até a zona de pouso a 120 m
-//   'planando'   depois de uma falha grave, plana de paraquedas até o ponto escolhido
-//   'descendo'   desce na vertical (com motor, ou de paraquedas em espiral)
+//   'decolando'    sobe na vertical em cima do hub até 120 m
+//   'voando'       vai do hub até o destino a 120 m
+//   'desviando'    vai até uma zona de pouso a 120 m (pane, GPS sem sinal...)
+//   'motor-fraco'  vai até uma zona de pouso perdendo altura
+//   'sem-gps'      parado no ar, tentando recuperar o sinal de GPS
+//   'planando'     de paraquedas, planando até o ponto escolhido
+//   'descendo'     desce na vertical (com motor, ou de paraquedas em espiral)
 // Fases finais (no chão): 'entregue', 'pouso-emergencia', 'pouso-paraquedas',
 // 'pousou-hub' e 'queda'.
+//
+// Eventos acontecem no "km da viagem", contado pelo HODÔMETRO: a distância total
+// voada desde o hub, somando todos os trechos (como o odômetro de um carro).
+// Assim, uma segunda falha pode acontecer no meio de um desvio de emergência.
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
 import {
   ALTITUDE_MINIMA_PARAQUEDAS,
@@ -49,20 +55,20 @@ export function altitudeDoVoo(voo) {
 
   // Planando: vai perdendo altura aos poucos, da altitude da falha até a de chegada
   if (voo.situacao === 'planando') {
-    const progresso = voo.km / distanciaKm(voo.origem, voo.destino);
+    const total = distanciaKm(voo.origem, voo.destino);
+    if (total === 0) return Math.round(voo.altitudeInicial); // pousa onde está: evita 0 ÷ 0
+    const progresso = voo.km / total;
     return Math.round(voo.altitudeInicial - (voo.altitudeInicial - voo.altitudeChegada) * progresso);
   }
 
   // Motor fraco: perde altura conforme anda
   if (voo.situacao === 'motor-fraco') return Math.round(voo.altitudeInicial - voo.perdaPorKm * voo.km);
 
-  // Voando ou desviando: sempre na altitude de cruzeiro
+  // Voando, desviando ou parado sem GPS: na altitude de cruzeiro
   return ALTITUDE_CRUZEIRO;
 }
 
 // Onde o drone está depois de voar "kmVoados" na reta da origem até o destino.
-// Usamos km (e não porcentagem) porque os eventos vão acontecer em km
-// específicos, como "pane no km 1,5".
 export function posicaoNaRota(origem, destino, kmVoados) {
   const total = distanciaKm(origem, destino);
   if (total === 0) return origem; // trecho sem comprimento: evita dividir por zero
@@ -75,6 +81,17 @@ export function posicaoNaRota(origem, destino, kmVoados) {
   };
 }
 
+// Onde o drone está agora
+function posicaoAtual(voo) {
+  return posicaoNaRota(voo.origem, voo.destino, voo.km);
+}
+
+// O que continua valendo quando o drone começa um trecho novo:
+// o vento, o hodômetro e se ele está sem GPS
+function continuar(voo) {
+  return { vento: voo.vento, hodometro: voo.hodometro || 0, semGps: voo.semGps };
+}
+
 // Transforma um evento de vento ({ tipo: 'vento', velocidade: 8, de: 'sul' })
 // no vento guardado no voo: o vetor { x, y } em m/s + os dados para mostrar na tela
 function criarVento(evento) {
@@ -85,6 +102,8 @@ function criarVento(evento) {
 function textoVento(vento) {
   return `Vento do ${vento.de} a ${Math.round(vento.velocidade * 3.6)} km/h`; // m/s × 3,6 = km/h
 }
+
+// ---------- Descida vertical ----------
 
 // Começa uma descida vertical: o drone para onde está e desce reto.
 // "situacaoFinal" e "mensagemFinal" valem quando ele tocar o chão.
@@ -102,6 +121,8 @@ function descer(voo) {
   }
   return { ...voo, altitude };
 }
+
+// ---------- Decolagem ----------
 
 // Decolagem vertical: o drone sobe em cima do hub e só sai do lugar a 120 m.
 // Eventos no km 0 acontecem durante a decolagem, na altitude do evento
@@ -131,7 +152,7 @@ function decolar(voo, eventos) {
     const comParaquedas = evento.tipo === 'falha-grave';
     const mensagem = comParaquedas
       ? 'Falha grave na decolagem! Paraquedas aberto, descendo sobre o hub'
-      : 'Pane na decolagem! Descendo de volta no hub';
+      : 'Problema na decolagem! Descendo de volta no hub';
     return iniciarDescida(
       { ...voo, paraquedasAberto: comParaquedas },
       altitude,
@@ -142,31 +163,45 @@ function decolar(voo, eventos) {
   }
 
   if (altitude === ALTITUDE_CRUZEIRO) {
-    // Chegou a 120 m: se houver vento no km 0, ele começa a valer agora
+    // Chegou a 120 m: começa a andar. Se houver vento no km 0, ele começa a valer agora.
     const ventoNoKm0 = eventos.find((e) => e.km === 0 && e.tipo === 'vento');
-    if (ventoNoKm0) {
-      const vento = criarVento(ventoNoKm0);
-      return { ...voo, altitude, situacao: 'voando', vento, mensagem: textoVento(vento) };
-    }
-    return { ...voo, altitude, situacao: 'voando', mensagem: 'Voando...' };
+    const vento = ventoNoKm0 ? criarVento(ventoNoKm0) : voo.vento;
+    const mensagem = ventoNoKm0 ? textoVento(vento) : 'Voando...';
+    return { ...voo, altitude, situacao: 'voando', hodometro: 0, vento, mensagem };
   }
   return { ...voo, altitude };
 }
 
-// Abre o paraquedas num local e altitude, escolhe onde pousar e começa a planar.
-// "motivo" é o começo da mensagem (ex.: "Falha grave no km 1.7!").
+// ---------- Reações de emergência ----------
+// Todas recebem o drone no ponto exato do problema: "local" (onde está) e "altitude".
+// "motivo" é o começo da mensagem (ex.: "Pane no km 1.5!").
+
+// Abre o paraquedas, escolhe onde pousar e começa a planar.
+// Abaixo da altitude mínima, o paraquedas não abre a tempo: é uma queda.
 function abrirParaquedas(voo, local, altitude, regiao, motivo) {
+  if (altitude < ALTITUDE_MINIMA_PARAQUEDAS) {
+    return {
+      ...continuar(voo),
+      origem: local,
+      destino: local,
+      km: 0,
+      situacao: 'queda',
+      emergencia: true,
+      mensagem: `${motivo} A ${Math.round(altitude)} m não há altura para o paraquedas: queda no local`,
+    };
+  }
+
   const vento = voo.vento || SEM_VENTO;
   const pouso = escolherPouso(local, altitude, regiao.zonas, regiao.areas, regiao.vias, vento);
 
   return {
+    ...continuar(voo),
     origem: local,
     destino: pouso.ponto,
     km: 0,
     situacao: 'planando',
     emergencia: true,
     paraquedasAberto: true,
-    vento: voo.vento,
     altitudeInicial: altitude,
     altitudeChegada: pouso.altitudeChegada,
     alcance: pouso.alcance,
@@ -177,49 +212,17 @@ function abrirParaquedas(voo, local, altitude, regiao, motivo) {
 }
 
 // Desvia para a zona de pouso mais próxima, com os motores bons, a 120 m.
-// "motivo" é o começo da mensagem (ex.: "Pane no km 1.5!").
 function desviarParaZona(voo, local, regiao, motivo) {
   const { zona } = zonaMaisProxima(local, regiao.zonas);
   return {
+    ...continuar(voo),
     origem: local,
     destino: zona,
     km: 0,
     situacao: 'desviando',
     emergencia: true,
-    vento: voo.vento, // o vento continua soprando
     mensagem: `${motivo} Desviando para a ${zona.id}`,
   };
-}
-
-// ---------- GPS ----------
-// Sem GPS, o drone não sabe direito onde está. Ele para no ar (paira) e tenta
-// recuperar o sinal. Se voltar, segue a rota. Se não voltar, usa a navegação de
-// reserva (bússola + câmera), que é menos precisa: por segurança, vai para a
-// zona de pouso mais próxima em vez de continuar a entrega.
-// Evento: { tipo: 'gps', km: 2 } (o sinal volta) ou { tipo: 'gps', km: 2, recupera: false }
-
-function perderGps(voo, evento) {
-  return {
-    ...voo,
-    km: evento.km, // para exatamente onde perdeu o sinal
-    situacao: 'sem-gps',
-    tiquesPairando: 0,
-    gpsVolta: evento.recupera !== false, // se o evento não disser nada, o sinal volta
-    mensagem: `Sinal de GPS perdido no km ${evento.km}! Parado no ar, tentando recuperar...`,
-  };
-}
-
-// Um tique pairando sem GPS
-function pairarSemGps(voo, regiao) {
-  const tiques = voo.tiquesPairando + 1;
-  if (tiques < TIQUES_TENTANDO_GPS) return { ...voo, tiquesPairando: tiques };
-
-  // Acabou o tempo de tentativa
-  if (voo.gpsVolta) {
-    return { ...voo, situacao: 'voando', mensagem: 'Sinal de GPS recuperado! Seguindo a rota' };
-  }
-  const local = posicaoNaRota(voo.origem, voo.destino, voo.km);
-  return desviarParaZona(voo, local, regiao, 'GPS não voltou: navegação de reserva (bússola e câmera).');
 }
 
 // ---------- Sistema de risco do motor fraco ----------
@@ -241,50 +244,127 @@ function respostaChegada(altitudePrevista) {
   return 'nao';
 }
 
-// Falha em um motor: o drone ainda voa, mas sem força para manter a altura.
-// Ele avalia TODAS as zonas de pouso e só segue para uma se a resposta for "sim".
-// Se for "talvez" ou "não" para todas, abre o paraquedas na hora, ainda a 120 m.
-function falhaMotor(voo, evento, regiao) {
-  const local = posicaoNaRota(voo.origem, voo.destino, evento.km);
-  const vento = voo.vento || SEM_VENTO;
+// Segue (ou continua) com motor fraco rumo a uma zona, a partir de "local" e "altitude".
+// Se a resposta não for "sim", abre o paraquedas na hora.
+function seguirComMotorFraco(voo, local, altitude, zona, regiao, motivo) {
+  const prevista = chegadaPrevista(local, altitude, zona, voo.vento || SEM_VENTO);
 
-  const avaliadas = regiao.zonas.map((zona) => ({
-    zona,
-    prevista: chegadaPrevista(local, ALTITUDE_CRUZEIRO, zona, vento),
-    distancia: distanciaKm(local, zona),
-  }));
-  const seguras = avaliadas
-    .filter((a) => respostaChegada(a.prevista) === 'sim')
-    .sort((a, b) => a.distancia - b.distancia); // menos tempo voando com motor quebrado
-
-  if (seguras.length === 0) {
-    const motivo = `Falha em um motor no km ${evento.km}! Nenhuma zona alcançável com segurança.`;
-    return abrirParaquedas(voo, local, ALTITUDE_CRUZEIRO, regiao, motivo);
+  if (respostaChegada(prevista) !== 'sim') {
+    return abrirParaquedas(voo, local, altitude, regiao, `${motivo} Chegada à ${zona.id} arriscada.`);
   }
 
-  const { zona, prevista } = seguras[0];
   return {
+    ...continuar(voo),
     origem: local,
     destino: zona,
     km: 0,
     situacao: 'motor-fraco',
     emergencia: true,
-    vento: voo.vento,
-    altitudeInicial: ALTITUDE_CRUZEIRO,
-    perdaPorKm: (ALTITUDE_CRUZEIRO - prevista) / distanciaKm(local, zona), // já com o vento
-    mensagem: `Falha em um motor no km ${evento.km}! Rumo à ${zona.id}, chegada prevista: ${Math.round(prevista)} m`,
+    altitudeInicial: altitude,
+    perdaPorKm: (altitude - prevista) / distanciaKm(local, zona), // já com o vento
+    mensagem: `${motivo} Rumo à ${zona.id}, chegada prevista: ${Math.round(prevista)} m`,
   };
 }
 
-// Falha grave em voo: os motores param. Abre o paraquedas na hora, a 120 m.
-function falhaGrave(voo, evento, regiao) {
-  const local = posicaoNaRota(voo.origem, voo.destino, evento.km);
-  return abrirParaquedas(voo, local, ALTITUDE_CRUZEIRO, regiao, `Falha grave no km ${evento.km}!`);
+// Falha em um motor: avalia TODAS as zonas e só segue para uma se a resposta for "sim".
+// Se for "talvez" ou "não" para todas, abre o paraquedas na hora.
+function falhaMotor(voo, local, altitude, regiao, motivo) {
+  const vento = voo.vento || SEM_VENTO;
+  const seguras = regiao.zonas
+    .map((zona) => ({ zona, prevista: chegadaPrevista(local, altitude, zona, vento) }))
+    .filter((a) => respostaChegada(a.prevista) === 'sim')
+    .sort((a, b) => distanciaKm(local, a.zona) - distanciaKm(local, b.zona)); // a mais perto
+
+  if (seguras.length === 0) {
+    return abrirParaquedas(voo, local, altitude, regiao, `${motivo} Nenhuma zona alcançável com segurança.`);
+  }
+  return seguirComMotorFraco(voo, local, altitude, seguras[0].zona, regiao, motivo);
 }
+
+// ---------- GPS ----------
+// Sem GPS, o drone não sabe direito onde está. Na rota normal, ele para no ar
+// (paira) e tenta recuperar o sinal. Se voltar, segue a rota. Se não voltar, usa
+// a navegação de reserva (bússola + câmera), menos precisa: por segurança, vai
+// para a zona de pouso mais próxima em vez de continuar a entrega.
+// Evento: { tipo: 'gps', km: 2 } (o sinal volta) ou { tipo: 'gps', km: 2, recupera: false }
+
+// Um tique pairando sem GPS. Eventos com { durante: 'gps' } acontecem na metade da espera.
+function pairarSemGps(voo, eventos, regiao) {
+  const tiques = voo.tiquesPairando + 1;
+
+  if (tiques === TIQUES_TENTANDO_GPS / 2) {
+    const evento = eventos.find((e) => e.durante === 'gps');
+    const reacao = evento ? aplicarEvento(voo, evento, regiao) : null;
+    if (reacao) return reacao;
+  }
+
+  if (tiques < TIQUES_TENTANDO_GPS) return { ...voo, tiquesPairando: tiques };
+
+  // Acabou o tempo de tentativa
+  if (voo.gpsVolta) {
+    return { ...voo, situacao: 'voando', semGps: false, mensagem: 'Sinal de GPS recuperado! Seguindo a rota' };
+  }
+  return desviarParaZona(voo, posicaoAtual(voo), regiao, 'GPS não voltou: navegação de reserva (bússola e câmera).');
+}
+
+// ---------- Eventos ----------
+
+// O que o drone faz quando um evento acontece. Recebe o drone no ponto exato do evento.
+// Devolve o voo novo, ou null quando o evento não muda nada naquela fase.
+function aplicarEvento(voo, evento, regiao) {
+  const local = posicaoAtual(voo);
+  const altitude = altitudeDoVoo(voo);
+  const onde = evento.durante === 'gps' ? 'sem GPS' : `no km ${evento.km}`;
+  const emEmergencia = voo.situacao !== 'voando';
+
+  switch (evento.tipo) {
+    case 'vento': {
+      // Com motor, o drone compensa o vento: a rota não muda, mas o vento fica guardado.
+      // Com motor fraco, o vento muda a previsão de chegada: o drone recalcula na hora.
+      const vento = criarVento(evento);
+      const comVento = { ...voo, vento };
+      if (voo.situacao === 'motor-fraco') {
+        return seguirComMotorFraco(comVento, local, altitude, voo.destino, regiao, `${textoVento(vento)}!`);
+      }
+      return { ...comVento, mensagem: textoVento(vento) };
+    }
+
+    case 'pane':
+      // Já está indo para uma zona de pouso (ou com motor fraco): a pane não muda o plano
+      if (voo.situacao === 'desviando' || voo.situacao === 'motor-fraco') return null;
+      return desviarParaZona(voo, local, regiao, `Pane ${onde}!`);
+
+    case 'motor':
+      if (voo.situacao === 'motor-fraco') return null; // já está com motor fraco
+      return falhaMotor(voo, local, altitude, regiao, `Falha em um motor ${onde}!`);
+
+    case 'falha-grave':
+      return abrirParaquedas(voo, local, altitude, regiao, `Falha grave ${onde}!`);
+
+    case 'gps':
+      // No meio de uma emergência, o drone não para: segue com a navegação de reserva
+      if (emEmergencia) {
+        return { ...voo, semGps: true, mensagem: 'GPS perdido durante a emergência: seguindo com navegação de reserva' };
+      }
+      return {
+        ...voo,
+        situacao: 'sem-gps',
+        semGps: true,
+        tiquesPairando: 0,
+        gpsVolta: evento.recupera !== false, // se o evento não disser nada, o sinal volta
+        mensagem: `Sinal de GPS perdido ${onde}! Parado no ar, tentando recuperar...`,
+      };
+
+    default:
+      return null;
+  }
+}
+
+// ---------- Chegada ----------
 
 // Chegou ao fim do trecho: em vez de descer em rampa, para e desce na vertical
 function chegarAoFim(voo, total) {
-  const chegou = { ...voo, km: total };
+  const chegou = { ...voo, km: total, hodometro: (voo.hodometro || 0) + (total - voo.km) };
 
   if (voo.situacao === 'voando') {
     return iniciarDescida(chegou, ALTITUDE_CRUZEIRO, 'Sobre o destino: descendo na vertical', 'entregue', 'Entrega concluída!');
@@ -308,6 +388,8 @@ function chegarAoFim(voo, total) {
   );
 }
 
+// ---------- O tique do relógio ----------
+
 // Avança o voo um tique (passoKm na horizontal) e verifica se aconteceu algum evento.
 // "regiao" junta os dados do mapa: { zonas, areas, vias }.
 export function avancarVoo(voo, passoKm, eventos, regiao) {
@@ -319,60 +401,50 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   if (voo.situacao === 'descendo') return descer(voo);
 
   // Sem GPS: parado no ar, tentando recuperar o sinal
-  if (voo.situacao === 'sem-gps') return pairarSemGps(voo, regiao);
+  if (voo.situacao === 'sem-gps') return pairarSemGps(voo, eventos, regiao);
 
   let passo = passoKm;
   if (voo.situacao === 'planando') passo = passoKm * VELOCIDADE_PARAQUEDAS;
   if (voo.situacao === 'motor-fraco') passo = passoKm * VELOCIDADE_MOTOR_FRACO;
+
   const kmNovo = voo.km + passo;
   const total = distanciaKm(voo.origem, voo.destino);
+  const hodometro = voo.hodometro || 0;
+  const hodometroNovo = hodometro + passo;
+
+  // Eventos: valem em qualquer fase em que o drone anda, menos planando
+  // (de paraquedas, sem motor, não há mais o que uma falha possa piorar).
+  // O evento acontece quando o hodômetro passa pelo km dele.
+  if (voo.situacao !== 'planando') {
+    const evento = eventos.find((e) => e.durante === undefined && hodometro < e.km && hodometroNovo >= e.km);
+    const kmNoEvento = evento ? voo.km + (evento.km - hodometro) : 0; // onde, neste trecho
+
+    if (evento && kmNoEvento <= total) {
+      const noPontoDoEvento = { ...voo, km: kmNoEvento, hodometro: evento.km };
+      const reacao = aplicarEvento(noPontoDoEvento, evento, regiao);
+      if (reacao) return reacao;
+    }
+  }
 
   // Motor fraco: a cada tique, refaz a pergunta "ainda consigo chegar com folga?".
   // Se a resposta deixar de ser "sim", abre o paraquedas JÁ, enquanto ainda há altura.
   if (voo.situacao === 'motor-fraco' && kmNovo < total) {
-    const local = posicaoNaRota(voo.origem, voo.destino, kmNovo);
+    const andou = { ...voo, km: kmNovo, hodometro: hodometroNovo };
+    const local = posicaoAtual(andou);
     const altitude = voo.altitudeInicial - voo.perdaPorKm * kmNovo;
     const prevista = chegadaPrevista(local, altitude, voo.destino, voo.vento || SEM_VENTO);
     const zona = voo.destino.id;
 
     if (respostaChegada(prevista) !== 'sim') {
-      const motivo = `Chegada à ${zona} ficou arriscada (${Math.round(prevista)} m previstos)!`;
-      return abrirParaquedas(voo, local, altitude, regiao, motivo);
+      return abrirParaquedas(andou, local, altitude, regiao, `Chegada à ${zona} ficou arriscada (${Math.round(prevista)} m previstos)!`);
     }
-    return { ...voo, km: kmNovo, mensagem: `Motor fraco, rumo à ${zona}. Chegada prevista: ${Math.round(prevista)} m` };
-  }
-
-  // Eventos em voo só valem na rota original, no momento em que o drone passa pelo km deles
-  const evento =
-    voo.situacao === 'voando' ? eventos.find((e) => voo.km < e.km && kmNovo >= e.km) : undefined;
-
-  if (evento && evento.tipo === 'pane') {
-    const local = posicaoNaRota(voo.origem, voo.destino, evento.km);
-    return desviarParaZona(voo, local, regiao, `Pane no km ${evento.km}!`);
-  }
-
-  if (evento && evento.tipo === 'gps') {
-    return perderGps(voo, evento);
-  }
-
-  // Vento: não muda a rota (com motor, o drone compensa), mas fica guardado no voo.
-  // Se depois houver uma falha grave, o paraquedas vai levar o vento em conta.
-  if (evento && evento.tipo === 'vento') {
-    const vento = criarVento(evento);
-    return { ...voo, km: kmNovo, vento, mensagem: textoVento(vento) };
-  }
-
-  if (evento && evento.tipo === 'falha-grave') {
-    return falhaGrave(voo, evento, regiao);
-  }
-
-  if (evento && evento.tipo === 'motor') {
-    return falhaMotor(voo, evento, regiao);
+    const reserva = voo.semGps ? ' (navegação de reserva)' : '';
+    return { ...andou, mensagem: `Motor fraco, rumo à ${zona}${reserva}. Chegada prevista: ${Math.round(prevista)} m` };
   }
 
   // Chegou ao fim do trecho?
   if (kmNovo >= total) return chegarAoFim(voo, total);
 
   // Nada de especial: só anda
-  return { ...voo, km: kmNovo };
+  return { ...voo, km: kmNovo, hodometro: hodometroNovo };
 }
