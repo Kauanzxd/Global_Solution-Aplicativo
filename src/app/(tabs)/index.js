@@ -31,7 +31,7 @@ const MISSOES = [
 const CONFIGURACAO_INICIAL = {
   destino: LOCAIS.find((local) => local.id === 'aldeia-jaragua'),
   prioridade: 'saude',
-  bateria: 80,
+  bateria: 60,
   eventos: [],
 };
 

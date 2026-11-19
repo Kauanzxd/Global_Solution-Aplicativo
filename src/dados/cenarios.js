@@ -8,7 +8,7 @@ export const CENARIOS = [
     descricao: 'Ida, entrega e volta sem imprevistos.',
     destino: 'aldeia-jaragua',
     prioridade: 'saude',
-    bateria: 80,
+    bateria: 60,
     eventos: [],
   },
   {
@@ -17,7 +17,7 @@ export const CENARIOS = [
     descricao: 'Pane em cima da Anhanguera: desvia para a zona de pouso.',
     destino: 'aldeia-jaragua',
     prioridade: 'saude',
-    bateria: 80,
+    bateria: 60,
     eventos: [{ tipo: 'pane', km: 1.7 }],
   },
   {
@@ -26,7 +26,7 @@ export const CENARIOS = [
     descricao: 'Motores param sobre a rodovia: paraquedas planando a favor do vento.',
     destino: 'aldeia-jaragua',
     prioridade: 'emergencia',
-    bateria: 85,
+    bateria: 60,
     eventos: [
       { tipo: 'vento', km: 0.5, velocidade: 8, de: 'sul' },
       { tipo: 'falha-grave', km: 1.7 },
@@ -38,7 +38,7 @@ export const CENARIOS = [
     descricao: 'Um motor falha: o sistema de risco vê que chega com folga ao hub e volta para lá.',
     destino: 'aldeia-jaragua',
     prioridade: 'saude',
-    bateria: 80,
+    bateria: 60,
     eventos: [{ tipo: 'motor', km: 1.5 }],
   },
   {
@@ -47,7 +47,7 @@ export const CENARIOS = [
     descricao: 'Sinal cai sobre a rodovia: afasta-se, espera e vai para a zona.',
     destino: 'aldeia-jaragua',
     prioridade: 'comercial',
-    bateria: 85,
+    bateria: 60,
     eventos: [{ tipo: 'gps', km: 1.7, duracao: 0 }],
   },
   {
@@ -56,7 +56,7 @@ export const CENARIOS = [
     descricao: 'Levando um órgão, cruza um drone comercial (ele cede) e um sem rádio (nós desviamos).',
     destino: 'hosp-pirituba',
     prioridade: 'orgaos',
-    bateria: 80,
+    bateria: 60,
     eventos: [
       { tipo: 'drone', km: 1.2, comunicacao: true, prioridade: 'comercial', comportamento: 'reto' },
       { tipo: 'drone', km: 3.2, comunicacao: false, prioridade: 'comercial', comportamento: 'errante' },
@@ -68,7 +68,7 @@ export const CENARIOS = [
     descricao: 'Obstáculos em movimento na ida: desvio em tempo real, com zoom.',
     destino: 'aldeia-jaragua',
     prioridade: 'saude',
-    bateria: 85,
+    bateria: 60,
     eventos: [
       { tipo: 'obstaculo', km: 1.5, objeto: 'guindaste' },
       { tipo: 'obstaculo', km: 3.3, objeto: 'passaros' },
@@ -80,9 +80,9 @@ export const CENARIOS = [
     descricao: 'Entrega feita, mas na volta a bateria cai e a temperatura sobe.',
     destino: 'aldeia-jaragua',
     prioridade: 'saude',
-    bateria: 80,
+    bateria: 50,
     eventos: [
-      { tipo: 'bateria', km: 5, perda: 25 },
+      { tipo: 'bateria', km: 5, perda: 20 },
       { tipo: 'temperatura', km: 6, grau: 'alta' },
     ],
   },
