@@ -1,4 +1,5 @@
-import { StyleSheet, View } from 'react-native';
+import { useRef } from 'react';
+import { Pressable, StyleSheet } from 'react-native';
 import Svg, { Circle, G, Line, Path, Polygon, Polyline, Rect, Text } from 'react-native-svg';
 import { AREAS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
 
@@ -321,7 +322,26 @@ function Guindaste({ base, ponta, s }) {
   );
 }
 
-// "destino" é o local para onde o drone vai (um item de LOCAIS)
+// Destino escolhido livremente no mapa (não é um dos locais conhecidos): um alfinete
+function MarcadorDestino({ destino, s }) {
+  const x = destino.x * ESCALA;
+  const y = destino.y * ESCALA;
+  return (
+    <G>
+      {/* O alfinete: uma gota (curva) com a ponta no ponto exato */}
+      <Path
+        d={`M ${x} ${y} C ${x - 2.6 * s} ${y - 3.2 * s} ${x - 2.6 * s} ${y - 6 * s} ${x} ${y - 6 * s} C ${x + 2.6 * s} ${y - 6 * s} ${x + 2.6 * s} ${y - 3.2 * s} ${x} ${y} Z`}
+        fill="#E0457B"
+        stroke="#FFFFFF"
+        strokeWidth={0.4 * s}
+      />
+      <Circle cx={x} cy={y - 4.2 * s} r={0.9 * s} fill="#FFFFFF" />
+      <Rotulo x={x} y={y + 3 * s} texto="Destino" tamanho={2.2} s={s} />
+    </G>
+  );
+}
+
+// "destino" é o local para onde o drone vai (um item de LOCAIS ou um ponto livre)
 // "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
 // "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
 // "altitude" é a altura do drone em metros (0 = no chão)
@@ -331,6 +351,7 @@ function Guindaste({ base, ponta, s }) {
 // "incerteza" (opcional): erro da posição em metros, quando o drone está sem GPS
 // "obstaculos" (opcional): lista de obstáculos em movimento para desenhar
 // "vista" (opcional): tamanho do pedaço do mapa na tela (100 = inteiro), centrado no drone
+// "aoTocar" (opcional): função chamada com o ponto { x, y } em km onde o usuário tocou
 export default function Mapa({
   destino,
   drone,
@@ -341,7 +362,10 @@ export default function Mapa({
   incerteza = 0,
   obstaculos = [],
   vista = 100,
+  aoTocar,
 }) {
+  // Referência para a caixa do mapa: serve para medir onde ela está na tela na hora do toque
+  const caixa = useRef(null);
   const hub = LOCAIS.find((local) => local.id === 'hub');
   const posicaoDrone = drone || hub;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -353,8 +377,30 @@ export default function Mapa({
   const x0 = limitar(posicaoDrone.x * ESCALA - vista / 2);
   const y0 = limitar(posicaoDrone.y * ESCALA - vista / 2);
 
+  // Toque → km.
+  // 1. O toque vem em pixels da TELA (pageX/pageY).
+  // 2. Medimos onde a caixa do mapa está na tela (measureInWindow) e subtraímos:
+  //    sobra a posição do toque DENTRO do mapa, em pixels.
+  // 3. Pixels ÷ largura = fração do mapa (0 a 1); × vista + x0 = unidade do desenho; ÷ ESCALA = km.
+  const tocar = (evento) => {
+    if (!aoTocar || !caixa.current) return;
+    const { pageX, pageY } = evento.nativeEvent;
+    caixa.current.measureInWindow((esquerda, topo, largura) => {
+      const ponto = {
+        x: (x0 + ((pageX - esquerda) / largura) * vista) / ESCALA,
+        y: (y0 + ((pageY - topo) / largura) * vista) / ESCALA,
+      };
+      // Só aceita números de verdade, dentro do mapa
+      const valido = Number.isFinite(ponto.x) && Number.isFinite(ponto.y);
+      if (valido) aoTocar({ x: Math.min(Math.max(ponto.x, 0), 10), y: Math.min(Math.max(ponto.y, 0), 10) });
+    });
+  };
+
+  // O destino é um ponto livre (não é um dos locais conhecidos)?
+  const destinoLivre = destino && !LOCAIS.some((local) => local.id === destino.id);
+
   return (
-    <View style={styles.caixa}>
+    <Pressable ref={caixa} style={styles.caixa} onPress={tocar} disabled={!aoTocar}>
       <Svg width="100%" height="100%" viewBox={`${x0} ${y0} ${vista} ${vista}`}>
         {/* 1. Fundo: terra */}
         <Rect x="0" y="0" width="100" height="100" fill={CORES.terra} />
@@ -493,6 +539,9 @@ export default function Mapa({
           <Local key={local.id} local={local} s={s} />
         ))}
 
+        {/* Destino livre (escolhido tocando no mapa) */}
+        {destinoLivre && <MarcadorDestino destino={destino} s={s} />}
+
         {/* 11. Drone: por último de tudo, para ficar por cima */}
         <Drone
           x={posicaoDrone.x}
@@ -509,7 +558,7 @@ export default function Mapa({
         {vento && <IndicadorVento vento={vento} />}
         {vista < 99 && <SeloZoom vezes={100 / vista} />}
       </Svg>
-    </View>
+    </Pressable>
   );
 }
 

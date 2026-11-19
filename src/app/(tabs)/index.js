@@ -1,43 +1,37 @@
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Cabecalho from '../../componentes/Cabecalho';
+import Contador from '../../componentes/Contador';
 import Mapa from '../../componentes/Mapa';
+import Opcoes from '../../componentes/Opcoes';
+import Secao from '../../componentes/Secao';
+import { TEMA } from '../../componentes/tema';
 import { AREAS, LOCAIS, VIAS, ZONAS_POUSO } from '../../dados/regiao';
+import { verificarDecolagem } from '../../regras/bateria';
+import { distanciaKm } from '../../regras/distancia';
 import { algumObstaculoPerto, desenhoObstaculo } from '../../regras/obstaculos';
+import { riscoNoPonto } from '../../regras/risco';
 import { altitudeDoVoo, avancarVoo, estaNoAr, incertezaDoVoo, posicaoNaRota } from '../../regras/voo';
 
 const hub = LOCAIS.find((local) => local.id === 'hub');
-// "locais": os pontos de entrega (têm gente em volta): numa emergência, o drone evita descer perto deles
-const REGIAO = { zonas: ZONAS_POUSO, areas: AREAS, vias: VIAS, locais: LOCAIS.filter((local) => local.id !== 'hub') };
+const LOCAIS_DE_ENTREGA = LOCAIS.filter((local) => local.id !== 'hub');
 
-// Por enquanto o cenário é fixo. No passo 4, quem monta é o usuário.
-// Outros testes: [{ tipo: 'pane', km: 1.5 }], [{ tipo: 'falha-grave', km: 0 }] ou
-// [{ tipo: 'falha-grave', km: 0, altitude: 20 }]. km 0 = durante a decolagem.
-// Vento: velocidade em m/s e "de" = de onde vem (norte, sul, leste, oeste, nordeste...)
-// Ex.: [{ tipo: 'vento', km: 0.5, velocidade: 8, de: 'sul' }, { tipo: 'falha-grave', km: 1.7 }]
-// Motor: { tipo: 'motor', km: 3.5 } chega à ZP com folga;
-// { tipo: 'motor', km: 1.5 } não chegaria com folga, então abre o paraquedas na hora
-// GPS: { tipo: 'gps', km: 1.7, duracao: 60 } o sinal volta depois de 60 s; sem "duracao", não volta.
-// O km é o da viagem inteira (hodômetro): eventos também acontecem no meio de um desvio.
-// { durante: 'gps' } no lugar do km = acontece 10 s depois da perda do sinal.
-// Temperatura: { tipo: 'temperatura', km: 1 } = alta; { ..., grau: 'critica' } = crítica.
-// Uma segunda temperatura alta, com o drone já quente, vira crítica.
-// Bateria: { tipo: 'bateria', km: 1, perda: 40 } = uma célula falha e a bateria cai 40 pontos
-// (sem "perda", cai 20). Teste com perda 20 (segue), 40 (zona) e 62 (paraquedas).
-// Obstáculo em movimento: { tipo: 'obstaculo', km: 2, objeto: 'passaros' } ou objeto: 'guindaste'
-// Outro drone da rede vindo de frente: { tipo: 'drone', km: 2.5, prioridade: 'comercial' }
-// (prioridade: orgaos, emergencia, saude ou comercial; opcionais: bateria, id)
-const destino = LOCAIS.find((local) => local.id === 'aldeia-jaragua');
-// Drone SEM rádio: { tipo: 'drone', km: 2.5, comunicacao: false, comportamento: 'errante' }
-// (comportamento: 'reto', 'pairando' ou 'errante'; opcionais: semGps: true, ambosSemRadio: true)
-// A missão tem ida e volta: a ida tem 4,2 km; km acima disso acontece na VOLTA ao hub.
-// Ex.: { tipo: 'drone', km: 6, prioridade: 'comercial' } = na volta, vazio, o nosso drone cede a vez
-const EVENTOS = [{ tipo: 'drone', km: 6, prioridade: 'comercial' }];
-const PRIORIDADE = 'saude'; // tipo da nossa missão — no passo 4, quem escolhe é o usuário
-const BATERIA_INICIAL = 80; // % — no passo 4, quem escolhe é o usuário
+// Tipos de missão (a prioridade do drone), com uma cor para cada
+const MISSOES = [
+  { valor: 'orgaos', rotulo: 'Órgãos', cor: '#C62828' },
+  { valor: 'emergencia', rotulo: 'Emergência', cor: '#E65100' },
+  { valor: 'saude', rotulo: 'Saúde', cor: '#2E7D32' },
+  { valor: 'comercial', rotulo: 'Comercial', cor: '#0B5CAD' },
+];
 
-// Zoom: com um obstáculo a até 1 km, o mapa aproxima para mostrar só 1,2 km em volta do drone (8x).
-// Começa cedo porque dois drones se aproximam rápido (30 m/s somando os dois).
+// Como a simulação começa, antes de o usuário mexer em nada
+const CONFIGURACAO_INICIAL = {
+  destino: LOCAIS.find((local) => local.id === 'aldeia-jaragua'),
+  prioridade: 'saude',
+  bateria: 80,
+};
+
+// Zoom: com um obstáculo a até 1 km, o mapa aproxima para mostrar só 1,2 km em volta do drone (8x)
 const VISTA_NORMAL = 100;
 const VISTA_APROXIMADA = 12;
 const RAIO_ZOOM_KM = 1;
@@ -45,39 +39,61 @@ const RAIO_ZOOM_KM = 1;
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
 const PASSO_KM = KM_POR_SEGUNDO * (PASSO_MS / 1000);
-// A cada atualização da tela, o drone toma 4 decisões (passos 4 vezes menores).
-// Ele reage mais rápido, o que faz diferença contra obstáculos imprevisíveis.
-const DECISOES_POR_TIQUE = 4;
+const DECISOES_POR_TIQUE = 4; // 4 decisões por atualização da tela: reage mais rápido
 
-// Um voo novo, parado no hub, pronto para decolar
-function criarVoo() {
+// O destino escolhido é válido? Devolve o problema em texto, ou null se estiver tudo certo.
+function problemaDoDestino(destino) {
+  if (distanciaKm(hub, destino) < 0.3) return 'O destino está colado no hub: escolha um ponto mais longe.';
+  if (riscoNoPonto(destino, AREAS, VIAS) === 'proibido') {
+    return 'O destino fica sobre uma rodovia ou trilho: não dá para pousar ali. Escolha outro ponto.';
+  }
+  return null;
+}
+
+// Um voo novo, parado no hub, pronto para decolar, com as escolhas do usuário
+function criarVoo(configuracao) {
   return {
     origem: hub,
-    destino,
+    destino: configuracao.destino,
     km: 0,
     altitude: 0,
-    bateria: BATERIA_INICIAL,
-    prioridade: PRIORIDADE,
+    bateria: configuracao.bateria,
+    prioridade: configuracao.prioridade,
     situacao: 'decolando',
     mensagem: 'Decolando...',
   };
 }
 
-// Aba "Simular" (rota "/"): aqui vai ficar o simulador de voo.
+// Aba "Simular" (rota "/"): monta a simulação e mostra o drone voando.
 export default function Simular() {
-  // null = montando a simulação (o drone ainda não saiu); um objeto = o voo acontecendo
+  const [configuracao, setConfiguracao] = useState(CONFIGURACAO_INICIAL);
+  // null = montando a simulação; um objeto = o voo acontecendo (ou terminado)
   const [voo, setVoo] = useState(null);
   const emVoo = voo !== null && estaNoAr(voo);
 
+  // Muda só um campo da configuração, mantendo os outros (o "..." copia o resto)
+  const mudar = (campo, valor) => setConfiguracao((atual) => ({ ...atual, [campo]: valor }));
+
+  // Os pontos de entrega têm gente: numa emergência, o drone evita descer perto deles.
+  // Se o destino for um ponto livre do mapa, ele também entra nessa lista.
+  const destinoLivre = !LOCAIS.some((local) => local.id === configuracao.destino.id);
+  const regiao = {
+    zonas: ZONAS_POUSO,
+    areas: AREAS,
+    vias: VIAS,
+    locais: destinoLivre ? [...LOCAIS_DE_ENTREGA, configuracao.destino] : LOCAIS_DE_ENTREGA,
+  };
+  const eventos = []; // a lista de eventos chega na próxima parte (4c)
+
   // Enquanto o drone está no ar, um "relógio" avança o voo a cada PASSO_MS
   useEffect(() => {
-    if (!emVoo) return; // pousou: não liga o relógio
+    if (!emVoo) return; // pousou (ou ainda não saiu): não liga o relógio
 
     const relogio = setInterval(() => {
       setVoo((atual) => {
         let proximo = atual;
         for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
-          proximo = avancarVoo(proximo, PASSO_KM / DECISOES_POR_TIQUE, EVENTOS, REGIAO);
+          proximo = avancarVoo(proximo, PASSO_KM / DECISOES_POR_TIQUE, eventos, regiao);
         }
         return proximo;
       });
@@ -85,14 +101,13 @@ export default function Simular() {
 
     // Quando o drone pousa (ou a tela fecha), desliga o relógio
     return () => clearInterval(relogio);
-  }, [emVoo]);
+  }, [emVoo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Antes de simular, o drone está parado no hub
   const posicao = voo ? posicaoNaRota(voo.origem, voo.destino, voo.km) : hub;
   const altitude = voo ? altitudeDoVoo(voo) : 0;
 
   // Zoom suave: a cada atualização do voo, a vista anda 30% do caminho até o alvo
-  // (perto de um obstáculo: aproximada; senão: o mapa inteiro)
   const [vista, setVista] = useState(VISTA_NORMAL);
   const obstaculoPerto = voo !== null && algumObstaculoPerto(voo.obstaculos, voo.tempo, posicao, RAIO_ZOOM_KM);
   const vistaAlvo = obstaculoPerto && emVoo ? VISTA_APROXIMADA : VISTA_NORMAL;
@@ -102,17 +117,29 @@ export default function Simular() {
       return Math.abs(vistaAlvo - proxima) < 0.5 ? vistaAlvo : proxima; // pertinho: encaixa no alvo
     });
   }, [voo, vistaAlvo]);
-  // Depois de uma pane ou falha grave em voo, o trecho atual é o desvio
+
   const desvio = voo && voo.emergencia ? voo : null;
-  // Paraquedas aberto. Sobre o hub não há planeio: sem áreas de alcance, os círculos não aparecem.
   const paraquedas = voo && voo.paraquedasAberto ? { alcance: voo.alcance, confortavel: voo.confortavel } : null;
 
+  // Verificações antes de decolar
+  const problemaDestino = problemaDoDestino(configuracao.destino);
+  const decolagem = verificarDecolagem(hub, configuracao.destino, configuracao.bateria);
+  const precisa = Math.ceil(decolagem.necessariaComMargem);
+  const podeIniciar = !problemaDestino && decolagem.pode;
+
+  // Atalhos de destino: os locais conhecidos + "Ponto no mapa" quando o usuário tocou no mapa
+  const opcoesDestino = LOCAIS_DE_ENTREGA.map((local) => ({ valor: local.id, rotulo: local.rotulo }));
+  if (destinoLivre) opcoesDestino.push({ valor: configuracao.destino.id, rotulo: 'Ponto no mapa' });
+
+  const missao = MISSOES.find((m) => m.valor === (voo ? configuracao.prioridade : configuracao.prioridade));
+
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.tela} contentContainerStyle={styles.conteudo}>
       <Cabecalho titulo="Simular voo" subtitulo="Monte uma situação e veja o drone em ação" />
+
       <View style={styles.areaMapa}>
         <Mapa
-          destino={destino}
+          destino={configuracao.destino}
           drone={posicao}
           desvio={desvio}
           altitude={altitude}
@@ -121,68 +148,200 @@ export default function Simular() {
           incerteza={voo ? incertezaDoVoo(voo) : 0}
           obstaculos={voo ? (voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo)) : []}
           vista={vista}
+          aoTocar={voo === null ? (ponto) => mudar('destino', { id: 'ponto-livre', rotulo: 'Ponto no mapa', ...ponto }) : undefined}
         />
       </View>
 
-      {/* Montando: só o botão de começar. Voando ou terminado: a situação e o botão de reiniciar. */}
       {voo === null ? (
-        <Pressable style={styles.botao} onPress={() => setVoo(criarVoo())}>
-          <Text style={styles.textoBotao}>Simular</Text>
-        </Pressable>
-      ) : (
+        // ---------- MONTANDO A SIMULAÇÃO ----------
         <View>
+          <Text style={styles.dicaMapa}>Toque em qualquer ponto do mapa para escolher o destino</Text>
+
+          <Secao titulo="Destino" dica={`${distanciaKm(hub, configuracao.destino).toFixed(1).replace('.', ',')} km do hub (ida)`}>
+            <Opcoes
+              opcoes={opcoesDestino}
+              valor={configuracao.destino.id}
+              aoEscolher={(id) => mudar('destino', LOCAIS.find((local) => local.id === id) || configuracao.destino)}
+            />
+            {problemaDestino ? <Text style={styles.alerta}>{problemaDestino}</Text> : null}
+          </Secao>
+
+          <Secao titulo="Tipo de entrega" dica="Define a prioridade do drone no tráfego aéreo">
+            <Opcoes opcoes={MISSOES} valor={configuracao.prioridade} aoEscolher={(valor) => mudar('prioridade', valor)} />
+          </Secao>
+
+          <Secao titulo="Bateria na decolagem" dica={`Esta rota precisa de ${precisa}% (ida + volta + 30% de margem)`}>
+            <View style={styles.linhaBateria}>
+              <Contador valor={configuracao.bateria} passo={5} minimo={10} maximo={100} sufixo="%" aoMudar={(valor) => mudar('bateria', valor)} />
+              <Text style={[styles.selo, decolagem.pode ? styles.seloOk : styles.seloNao]}>
+                {decolagem.pode ? 'Pode decolar' : 'Insuficiente'}
+              </Text>
+            </View>
+            {/* Barra: o quanto a bateria tem, com uma marca no quanto a rota exige */}
+            <View style={styles.barra}>
+              <View
+                style={[
+                  styles.barraCheia,
+                  { width: `${configuracao.bateria}%`, backgroundColor: decolagem.pode ? TEMA.sucesso : TEMA.perigo },
+                ]}
+              />
+              <View style={[styles.marcaPrecisa, { left: `${Math.min(precisa, 100)}%` }]} />
+            </View>
+          </Secao>
+
+          <Pressable
+            style={[styles.botao, !podeIniciar && styles.botaoDesligado]}
+            onPress={() => setVoo(criarVoo(configuracao))}
+            disabled={!podeIniciar}
+          >
+            <Text style={styles.textoBotao}>Iniciar simulação</Text>
+          </Pressable>
+          {!podeIniciar ? (
+            <Text style={styles.motivo}>
+              {problemaDestino || `A decolagem seria negada: a bateria precisa de pelo menos ${precisa}% para esta rota.`}
+            </Text>
+          ) : null}
+        </View>
+      ) : (
+        // ---------- VOO ACONTECENDO ----------
+        <View style={styles.painel}>
+          <Text style={[styles.missao, { color: missao.cor }]}>
+            {missao.rotulo} · Hub → {configuracao.destino.rotulo}
+          </Text>
           <Text style={styles.status}>{voo.mensagem}</Text>
           <Text style={styles.bateria}>Bateria: {Math.round(voo.bateria)}%</Text>
           <Pressable style={[styles.botao, styles.botaoSecundario]} onPress={() => setVoo(null)}>
-            <Text style={[styles.textoBotao, styles.textoSecundario]}>Reiniciar</Text>
+            <Text style={[styles.textoBotao, styles.textoSecundario]}>{emVoo ? 'Interromper e reiniciar' : 'Nova simulação'}</Text>
           </Pressable>
         </View>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  tela: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: TEMA.fundo,
+  },
+  conteudo: {
     paddingHorizontal: 16,
     paddingTop: 48,
+    paddingBottom: 32,
   },
   areaMapa: {
-    marginTop: 24,
+    marginTop: 20,
+  },
+  dicaMapa: {
+    marginTop: 8,
+    fontSize: 13,
+    textAlign: 'center',
+    color: TEMA.textoSuave,
+  },
+  alerta: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: TEMA.perigoClaro,
+    color: TEMA.perigo,
+    fontSize: 13,
+  },
+  linhaBateria: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  selo: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    fontSize: 13,
+    fontWeight: '700',
+    overflow: 'hidden',
+  },
+  seloOk: {
+    backgroundColor: TEMA.sucessoClaro,
+    color: TEMA.sucesso,
+  },
+  seloNao: {
+    backgroundColor: TEMA.perigoClaro,
+    color: TEMA.perigo,
+  },
+  barra: {
+    marginTop: 14,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: TEMA.borda,
+    overflow: 'visible',
+  },
+  barraCheia: {
+    height: 10,
+    borderRadius: 5,
+  },
+  // A marca do "quanto a rota exige": um tracinho escuro em cima da barra
+  marcaPrecisa: {
+    position: 'absolute',
+    top: -4,
+    width: 3,
+    height: 18,
+    marginLeft: -1.5,
+    borderRadius: 2,
+    backgroundColor: TEMA.texto,
+  },
+  painel: {
+    marginTop: 14,
+    padding: 16,
+    borderRadius: TEMA.raio,
+    borderWidth: 1,
+    borderColor: TEMA.borda,
+    backgroundColor: TEMA.cartao,
+  },
+  missao: {
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   status: {
-    marginTop: 12,
+    marginTop: 10,
     fontSize: 16,
     textAlign: 'center',
-    color: '#2B3440',
+    color: TEMA.texto,
   },
   bateria: {
     marginTop: 8,
     fontSize: 14,
     textAlign: 'center',
-    color: '#5A6573',
+    color: TEMA.textoSuave,
   },
   botao: {
-    marginTop: 16,
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: '#0B5CAD',
+    marginTop: 18,
+    paddingVertical: 15,
+    borderRadius: 12,
+    backgroundColor: TEMA.marca,
     alignItems: 'center',
+  },
+  botaoDesligado: {
+    backgroundColor: '#9FB4CC',
   },
   textoBotao: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: '#FFFFFF',
   },
-  // Botão secundário: fundo branco com borda (menos chamativo que o principal)
   botaoSecundario: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: TEMA.cartao,
     borderWidth: 1.5,
-    borderColor: '#0B5CAD',
+    borderColor: TEMA.marca,
   },
   textoSecundario: {
-    color: '#0B5CAD',
+    color: TEMA.marca,
+  },
+  motivo: {
+    marginTop: 8,
+    fontSize: 13,
+    textAlign: 'center',
+    color: TEMA.perigo,
   },
 });
