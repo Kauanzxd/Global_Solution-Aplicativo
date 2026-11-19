@@ -2,7 +2,6 @@
 // Sem motores, o drone abre o paraquedas e plana de forma estável (como um
 // planador, perdendo altura aos poucos) até o ponto escolhido. Lá, ele desce
 // em espiral sobre o ponto e pousa suave. Só contas, sem desenho.
-import { distanciaKm } from './distancia.js';
 import { riscoNoPonto } from './risco.js';
 
 export const PLANEIO = 3; // a cada 1 m que desce, anda 3 m para frente
@@ -12,16 +11,70 @@ export const MARGEM_POUSO_M = 40; // altura guardada para a espiral final e um p
 // Nomes dos riscos para mostrar na tela (com acento)
 export const NOMES_RISCO = { baixo: 'baixo', medio: 'médio', alto: 'alto', proibido: 'proibido' };
 
-// Até onde o drone consegue planar, em km, a partir de uma altitude em metros.
-// Ex.: 120 m × 3 = 360 m = 0,36 km
-export function alcanceKm(altitude) {
-  return (Math.max(altitude, 0) * PLANEIO) / 1000;
+// Velocidades do paraquedas em relação ao AR (como se não houvesse vento)
+export const VELOCIDADE_AR_MS = 9; // anda 9 m/s para frente...
+export const DESCIDA_MS = VELOCIDADE_AR_MS / PLANEIO; // ...e desce 3 m/s (planeio 3:1)
+
+export const SEM_VENTO = { x: 0, y: 0 };
+
+// Para onde o vento empurra, conforme a direção DE ONDE ele vem.
+// Lembrete: no nosso mapa, y cresce para o sul. Vento "do norte" empurra para o sul (y +).
+const DIRECOES_VENTO = {
+  norte: { x: 0, y: 1 },
+  sul: { x: 0, y: -1 },
+  leste: { x: -1, y: 0 },
+  oeste: { x: 1, y: 0 },
+  nordeste: { x: -0.707, y: 0.707 },
+  noroeste: { x: 0.707, y: 0.707 },
+  sudeste: { x: -0.707, y: -0.707 },
+  sudoeste: { x: 0.707, y: -0.707 },
+};
+
+// O vento como um vetor { x, y } em m/s. Ex.: vetorVento(8, 'norte') → { x: 0, y: 8 }
+export function vetorVento(velocidade, de) {
+  const direcao = DIRECOES_VENTO[de];
+  return { x: direcao.x * velocidade, y: direcao.y * velocidade };
 }
 
-// Com que altitude o drone chega depois de planar "distancia" km.
-// Ex.: saiu de 120 m e planou 0,18 km (180 m) → perdeu 60 m → chega a 60 m
-export function altitudeAoChegar(altitude, distancia) {
-  return altitude - (distancia * 1000) / PLANEIO;
+// Quantos segundos o paraquedas leva para ir de um ponto a outro, com vento.
+// "deslocamento" é { x, y } em metros. Infinity = impossível (vento contra forte demais).
+//
+// O drone aponta para onde precisar; o vento soma o empurrão dele.
+// No chão, ele anda: deslocamento = (velocidade do drone no ar + vento) × tempo.
+// A velocidade no ar tem tamanho fixo (9 m/s). Isso vira uma equação do 2º grau
+// no tempo t:   a·t² + b·t + c = 0   — e resolvemos com Bhaskara.
+export function tempoAteOPonto(deslocamento, vento) {
+  const a = VELOCIDADE_AR_MS ** 2 - (vento.x ** 2 + vento.y ** 2);
+  const b = 2 * (deslocamento.x * vento.x + deslocamento.y * vento.y);
+  const c = -(deslocamento.x ** 2 + deslocamento.y ** 2);
+
+  // Vento exatamente igual à velocidade do drone: a equação vira do 1º grau
+  if (Math.abs(a) < 1e-9) return b > 0 ? -c / b : Infinity;
+
+  const delta = b * b - 4 * a * c;
+  if (delta < 0) return Infinity; // sem solução: não dá para chegar lá
+
+  const raizes = [(-b + Math.sqrt(delta)) / (2 * a), (-b - Math.sqrt(delta)) / (2 * a)];
+  const positivas = raizes.filter((t) => t > 0); // tempo negativo não existe
+  return positivas.length > 0 ? Math.min(...positivas) : Infinity;
+}
+
+// Com que altitude o drone chega ao ponto, planando a partir do local.
+// Ex. sem vento: saiu de 120 m e planou 180 m → levou 20 s → desceu 60 m → chega a 60 m
+export function altitudeAoChegar(altitude, local, ponto, vento) {
+  const deslocamento = { x: (ponto.x - local.x) * 1000, y: (ponto.y - local.y) * 1000 }; // km → m
+  return altitude - DESCIDA_MS * tempoAteOPonto(deslocamento, vento);
+}
+
+// Área que o drone consegue alcançar até ficar com uma certa altitude ("sobra").
+// É um círculo: o raio é o quanto ele anda no ar nesse tempo, e o centro é
+// empurrado pelo vento na mesma quantidade de tempo (é a "deriva"). Tudo em km.
+export function areaDeAlcance(local, altitude, sobra, vento) {
+  const tempo = Math.max(altitude - sobra, 0) / DESCIDA_MS; // segundos até chegar na sobra
+  return {
+    centro: { x: local.x + (vento.x * tempo) / 1000, y: local.y + (vento.y * tempo) / 1000 },
+    raio: (VELOCIDADE_AR_MS * tempo) / 1000,
+  };
 }
 
 // Pontos que o drone poderia alcançar: 16 direções (como uma rosa dos ventos)
@@ -52,20 +105,20 @@ const ORDEM_RISCO = { zona: 0, baixo: 1, medio: 2, alto: 3, proibido: 4 };
 const ACEITAVEIS = ['zona', 'baixo', 'medio'];
 
 // Escolhe onde pousar de paraquedas, a partir do local e da altitude da falha.
-export function escolherPouso(local, altitude, zonas, areas, vias) {
-  const alcance = alcanceKm(altitude);
-  // Alcance confortável: até onde ele chega ainda com a margem para a espiral final
-  const alcanceConfortavel = alcanceKm(altitude - MARGEM_POUSO_M);
+export function escolherPouso(local, altitude, zonas, areas, vias, vento = SEM_VENTO) {
+  // Alcance total (chega ao chão) e confortável (chega com a margem para a espiral final)
+  const alcance = areaDeAlcance(local, altitude, 0, vento);
+  const confortavel = areaDeAlcance(local, altitude, MARGEM_POUSO_M, vento);
 
-  // Todas as opções: zonas de pouso + pontos candidatos, só as que dá para alcançar
+  // Todas as opções: zonas de pouso + pontos candidatos dentro da área de alcance
   const opcoesZonas = zonas.map((zona) => ({ ponto: zona, risco: 'zona', nome: zona.id }));
-  const opcoesPontos = pontosCandidatos(local, alcance).map((ponto) => {
+  const opcoesPontos = pontosCandidatos(alcance.centro, alcance.raio).map((ponto) => {
     const risco = riscoNoPonto(ponto, areas, vias);
     return { ponto, risco, nome: `área de risco ${NOMES_RISCO[risco]}` };
   });
   const opcoes = [...opcoesZonas, ...opcoesPontos]
-    .map((opcao) => ({ ...opcao, distancia: distanciaKm(local, opcao.ponto) }))
-    .filter((opcao) => opcao.distancia <= alcance);
+    .map((opcao) => ({ ...opcao, altitudeChegada: altitudeAoChegar(altitude, local, opcao.ponto, vento) }))
+    .filter((opcao) => opcao.altitudeChegada > -0.01); // chega antes de tocar o chão (com folga de arredondamento)
 
   // Ordem de preferência (o sort coloca a melhor opção em primeiro):
   opcoes.sort((a, b) => {
@@ -76,17 +129,18 @@ export function escolherPouso(local, altitude, zonas, areas, vias) {
 
     // 2º Entre as aceitáveis: chegar com margem para um pouso suave vem antes
     if (aAceitavel) {
-      const aConfortavel = a.distancia <= alcanceConfortavel;
-      const bConfortavel = b.distancia <= alcanceConfortavel;
+      const aConfortavel = a.altitudeChegada >= MARGEM_POUSO_M;
+      const bConfortavel = b.altitudeChegada >= MARGEM_POUSO_M;
       if (aConfortavel !== bConfortavel) return aConfortavel ? -1 : 1;
     }
 
     // 3º Menor risco
     if (a.risco !== b.risco) return ORDEM_RISCO[a.risco] - ORDEM_RISCO[b.risco];
 
-    // 4º Mais perto
-    return a.distancia - b.distancia;
+    // 4º Chega com mais altura (sem vento, é o mesmo que "mais perto")
+    return b.altitudeChegada - a.altitudeChegada;
   });
 
-  return { ...opcoes[0], alcance, alcanceConfortavel };
+  const melhor = opcoes[0];
+  return { ...melhor, altitudeChegada: Math.max(melhor.altitudeChegada, 0), alcance, confortavel };
 }

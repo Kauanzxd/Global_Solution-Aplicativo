@@ -9,7 +9,7 @@
 // Fases finais (no chão): 'entregue', 'pouso-emergencia', 'pouso-paraquedas',
 // 'pousou-hub' e 'queda'.
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
-import { ALTITUDE_MINIMA_PARAQUEDAS, MARGEM_POUSO_M, altitudeAoChegar, escolherPouso } from './paraquedas.js';
+import { ALTITUDE_MINIMA_PARAQUEDAS, MARGEM_POUSO_M, SEM_VENTO, escolherPouso } from './paraquedas.js';
 
 export const ALTITUDE_CRUZEIRO = 120; // metros: teto comum para drones no Brasil
 const VELOCIDADE_PARAQUEDAS = 0.15; // planando, anda a 15% da velocidade normal
@@ -30,8 +30,11 @@ export function altitudeDoVoo(voo) {
   // Na vertical, a altitude fica guardada no próprio voo
   if (voo.situacao === 'decolando' || voo.situacao === 'descendo') return Math.round(voo.altitude);
 
-  // Planando: perde 1 m a cada 3 m que anda
-  if (voo.situacao === 'planando') return Math.round(altitudeAoChegar(voo.altitudeInicial, voo.km));
+  // Planando: vai perdendo altura aos poucos, da altitude da falha até a de chegada
+  if (voo.situacao === 'planando') {
+    const progresso = voo.km / distanciaKm(voo.origem, voo.destino);
+    return Math.round(voo.altitudeInicial - (voo.altitudeInicial - voo.altitudeChegada) * progresso);
+  }
 
   // Voando ou desviando: sempre na altitude de cruzeiro
   return ALTITUDE_CRUZEIRO;
@@ -115,7 +118,8 @@ function decolar(voo, eventos) {
 // Falha grave em voo: os motores param. Abre o paraquedas e escolhe onde pousar.
 function falhaGrave(voo, evento, regiao) {
   const local = posicaoNaRota(voo.origem, voo.destino, evento.km);
-  const pouso = escolherPouso(local, ALTITUDE_CRUZEIRO, regiao.zonas, regiao.areas, regiao.vias);
+  const vento = voo.vento || SEM_VENTO;
+  const pouso = escolherPouso(local, ALTITUDE_CRUZEIRO, regiao.zonas, regiao.areas, regiao.vias, vento);
 
   return {
     origem: local,
@@ -124,9 +128,11 @@ function falhaGrave(voo, evento, regiao) {
     situacao: 'planando',
     emergencia: true,
     paraquedasAberto: true,
+    vento: voo.vento,
     altitudeInicial: ALTITUDE_CRUZEIRO,
+    altitudeChegada: pouso.altitudeChegada,
     alcance: pouso.alcance,
-    alcanceConfortavel: pouso.alcanceConfortavel,
+    confortavel: pouso.confortavel,
     nomePouso: pouso.nome,
     mensagem: `Falha grave no km ${evento.km}! Paraquedas aberto, planando para ${pouso.nome}`,
   };
@@ -146,7 +152,7 @@ function chegarAoFim(voo, total) {
   }
 
   // Planando: chega com a altura que sobrou e desce em espiral sobre o ponto
-  const altitudeChegada = Math.max(altitudeAoChegar(voo.altitudeInicial, total), 0);
+  const altitudeChegada = voo.altitudeChegada;
   const forcado = altitudeChegada < MARGEM_POUSO_M;
   return iniciarDescida(
     chegou,

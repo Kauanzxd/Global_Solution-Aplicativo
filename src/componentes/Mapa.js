@@ -143,7 +143,8 @@ function Drone({ x, y, altitude, comParaquedas }) {
 // "drone" é a posição atual do drone { x, y } em km; sem ela, ele fica no hub
 // "desvio" (opcional) é o trecho de emergência { origem, destino } depois de uma pane
 // "altitude" é a altura do drone em metros (0 = no chão)
-// "paraquedas" (opcional): { centro, alcance, alcanceConfortavel } da falha grave
+// "paraquedas" (opcional): paraquedas aberto. Na falha grave em voo, traz as áreas
+// { alcance, confortavel }, cada uma um círculo { centro, raio } em km
 export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas }) {
   const hub = LOCAIS.find((local) => local.id === 'hub');
   const posicaoDrone = drone || hub;
@@ -248,12 +249,12 @@ export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas 
 
         {/* Alcance do paraquedas: círculo de fora = até onde ele consegue planar;
             círculo de dentro = até onde ele chega com margem para um pouso suave */}
-        {paraquedas && (
+        {paraquedas && paraquedas.alcance && (
           <G>
             <Circle
-              cx={paraquedas.centro.x * ESCALA}
-              cy={paraquedas.centro.y * ESCALA}
-              r={paraquedas.alcance * ESCALA}
+              cx={paraquedas.alcance.centro.x * ESCALA}
+              cy={paraquedas.alcance.centro.y * ESCALA}
+              r={paraquedas.alcance.raio * ESCALA}
               fill="#D32F2F"
               fillOpacity="0.08"
               stroke="#D32F2F"
@@ -261,9 +262,9 @@ export default function Mapa({ destino, drone, desvio, altitude = 0, paraquedas 
               strokeDasharray="1 1"
             />
             <Circle
-              cx={paraquedas.centro.x * ESCALA}
-              cy={paraquedas.centro.y * ESCALA}
-              r={paraquedas.alcanceConfortavel * ESCALA}
+              cx={paraquedas.confortavel.centro.x * ESCALA}
+              cy={paraquedas.confortavel.centro.y * ESCALA}
+              r={paraquedas.confortavel.raio * ESCALA}
               fill="#2E7D32"
               fillOpacity="0.12"
               stroke="#2E7D32"

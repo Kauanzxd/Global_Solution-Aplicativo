@@ -46,10 +46,8 @@ export default function Simular() {
   const altitude = altitudeDoVoo(voo);
   // Depois de uma pane ou falha grave em voo, o trecho atual é o desvio
   const desvio = voo.emergencia ? voo : null;
-  // Paraquedas aberto. Sobre o hub não há planeio: alcance 0, os círculos não aparecem.
-  const paraquedas = voo.paraquedasAberto
-    ? { centro: voo.origem, alcance: voo.alcance || 0, alcanceConfortavel: voo.alcanceConfortavel || 0 }
-    : null;
+  // Paraquedas aberto. Sobre o hub não há planeio: sem áreas de alcance, os círculos não aparecem.
+  const paraquedas = voo.paraquedasAberto ? { alcance: voo.alcance, confortavel: voo.confortavel } : null;
 
   return (
     <View style={styles.container}>
