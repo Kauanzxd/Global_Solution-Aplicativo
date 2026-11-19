@@ -8,7 +8,7 @@ import Mapa from '../../componentes/Mapa';
 import Opcoes from '../../componentes/Opcoes';
 import Secao from '../../componentes/Secao';
 import { TEMA } from '../../componentes/tema';
-import { AREAS, LOCAIS, VIAS, ZONAS_POUSO } from '../../dados/regiao';
+import { AREAS, LOCAIS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../../dados/regiao';
 import { verificarDecolagem } from '../../regras/bateria';
 import { distanciaKm } from '../../regras/distancia';
 import { algumObstaculoPerto, desenhoObstaculo } from '../../regras/obstaculos';
@@ -59,9 +59,12 @@ function eventosParaOVoo(eventos, distanciaIda) {
     });
 }
 
-// Zoom: com um obstáculo a até 1 km, o mapa aproxima para mostrar só 1,2 km em volta do drone (8x)
-const VISTA_NORMAL = 100;
-const VISTA_APROXIMADA = 12;
+// Zoom: a "vista" é medida em unidades do desenho (o mapa inteiro tem 100).
+// Para pensar em km, convertemos: 1 km = 100 ÷ TAMANHO_KM unidades (com 20 km, 5 unidades).
+const UNIDADES_POR_KM = 100 / TAMANHO_KM;
+const VISTA_MONTAGEM = 100; // montando: o mapa inteiro, para tocar em qualquer ponto
+const VISTA_VOO = 10 * UNIDADES_POR_KM; // voando: 10 km em volta do drone, seguindo ele
+const VISTA_APROXIMADA = 1.2 * UNIDADES_POR_KM; // obstáculo a até 1 km: só 1,2 km em volta
 const RAIO_ZOOM_KM = 1;
 
 const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
@@ -82,7 +85,7 @@ function problemaDoDestino(destino) {
 // na volta, a partir do destino, no caminho de volta ao hub.
 // Ida e volta usam a mesma linha, então cada marcador é empurrado um pouco para a
 // DIREITA do sentido do voo: ficam duas "faixas", como uma estrada de mão dupla.
-const AFASTAMENTO_FAIXA_KM = 0.25;
+const AFASTAMENTO_FAIXA_KM = 0.5; // com o mapa de 20 km, 500 m separam bem as faixas na tela
 
 function marcadoresDosEventos(eventos, destino, distanciaIda) {
   if (distanciaIda === 0) return [];
@@ -179,9 +182,10 @@ export default function Simular() {
   const altitude = voo ? altitudeDoVoo(voo) : 0;
 
   // Zoom suave: a cada atualização do voo, a vista anda 30% do caminho até o alvo
-  const [vista, setVista] = useState(VISTA_NORMAL);
+  const [vista, setVista] = useState(VISTA_MONTAGEM);
   const obstaculoPerto = voo !== null && algumObstaculoPerto(voo.obstaculos, voo.tempo, posicao, RAIO_ZOOM_KM);
-  const vistaAlvo = obstaculoPerto && emVoo ? VISTA_APROXIMADA : VISTA_NORMAL;
+  let vistaAlvo = VISTA_MONTAGEM;
+  if (voo !== null) vistaAlvo = obstaculoPerto && emVoo ? VISTA_APROXIMADA : VISTA_VOO;
   useEffect(() => {
     setVista((atual) => {
       const proxima = atual + (vistaAlvo - atual) * 0.3;

@@ -8,7 +8,7 @@ import { AREAS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dad
 const ESCALA = 100 / TAMANHO_KM;
 
 // ZOOM: a "vista" é o pedaço do papel que aparece na tela. Vista de 100 = mapa inteiro;
-// vista de 25 = só 2,5 km em volta do drone (4 vezes mais perto).
+// vista de 25 = só 1/4 do mapa em volta do drone (4 vezes mais perto; com 20 km, 5 km).
 // Com zoom, o TERRENO aumenta, mas os SÍMBOLOS (drone, ícones, textos, linhas) devem
 // continuar do mesmo tamanho na tela, como no Google Maps. Para isso, todo tamanho de
 // símbolo é multiplicado por "s" = vista ÷ 100 (com vista 25, s = 0,25).
@@ -428,7 +428,15 @@ export default function Mapa({
 
         {/* 3. Rios e córregos (linhas azuis finas) */}
         {RIOS.map((rio) => (
-          <Polyline key={rio.nome} points={paraPontosSvg(rio.pontos)} fill="none" stroke={CORES.agua} strokeWidth={0.8 * s} />
+          <Polyline
+            key={rio.nome}
+            points={paraPontosSvg(rio.pontos)}
+            fill="none"
+            stroke={CORES.agua}
+            strokeLinecap="round"
+            // Rio largo (Tietê): grossura de terreno, em km. Córrego: traço fino de tamanho fixo.
+            strokeWidth={rio.largura ? Math.max(rio.largura * ESCALA, 0.8 * s) : 0.8 * s}
+          />
         ))}
 
         {/* 4. Pico do Jaraguá: um triângulo, o símbolo de montanha */}
@@ -577,7 +585,8 @@ export default function Mapa({
       {/* 12. Painel por cima do mapa, sem zoom: vento e selo de zoom */}
       <Svg style={StyleSheet.absoluteFill} viewBox="0 0 100 100" pointerEvents="none">
         {vento && <IndicadorVento vento={vento} />}
-        {vista < 99 && <SeloZoom vezes={100 / vista} />}
+        {/* O selo só aparece no zoom forte (obstáculo perto), não na vista normal do voo */}
+        {vista < 40 && <SeloZoom vezes={100 / vista} />}
       </Svg>
     </Pressable>
   );
