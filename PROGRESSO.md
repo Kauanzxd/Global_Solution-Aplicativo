@@ -135,8 +135,10 @@ Parte secundária: aba de Pedidos.
 
 ## Próximos passos (nesta ordem)
 
+**Única pendência do projeto: terminar o aplicativo até 23/11/2026.**
+As outras entregas da Global Solution já foram feitas e estão certas.
 Passos 1 a 5a (voo, eventos, tela de montagem, cenários) e o mapa real
-estão PRONTOS. A apresentação é de 23 a 27/11.
+estão PRONTOS. As apresentações são de 23 a 27/11.
 
 1. **Missão de órgãos**: hospital X (coleta) → hospital Y (entrega) →
    filial, com escolha de dois hospitais quando a prioridade for órgãos e
@@ -152,20 +154,6 @@ estão PRONTOS. A apresentação é de 23 a 27/11.
 Pendências menores:
 - Níveis 1 e 2 pegando um drone comercial que ainda não decolou.
 - Lint não configurado (`npx expo lint` instalaria pacotes).
-- O h177 e os 16 hospitais corrigidos no app continuam com a posição do
-  CNES no `sadec.py` (181 hospitais, não 182).
-
-Pendências dos outros repositórios (fora do app):
-- Railway: o deploy antigo (`sadec-web-production`) é de outro integrante e
-  está desatualizado; o novo foi feito na conta do Kauan. Conferir o domínio
-  novo, o volume em `/data` e atualizar o link no README do site.
-- Vercel: criar `vercel.json` (repasse de `/api`, `/sadec`, `/healthz` para o
-  Railway) e `.vercelignore` (sem banco, Java, Python, testes) antes de importar.
-- Nome do projeto: o site usa "Cuidado e Entrega"; as outras matérias,
-  "Entrega e Cuidado". Padronizar.
-- SE: os 3 diagramas de caso de uso não parecem do Astah (o enunciado pede).
-- `Global_Solution-projects` tem as chaves reais em `ChatBot/chaves-api (1).txt`:
-  gerar chaves novas antes de deixar o repositório público.
 
 ## Para testar
 
@@ -270,5 +258,6 @@ Expo Go, na mesma rede Wi-Fi.
   (mesmo conteúdo, autor trocado) e `git reset --hard origin/main`; gerar PDF a
   partir de HTML com o Chrome; acessibilidade e responsividade testadas em
   390/768/1440 px.
-- **Onde paramos:** entregas prontas. Próximo no app: missão de órgãos e
-  publicar com QR code; fora do app, ver as pendências dos outros repositórios.
+- **Onde paramos:** todas as entregas da GS feitas e certas. A única
+  pendência é terminar o app até 23/11: próximo é a missão de órgãos e
+  publicar com QR code.
