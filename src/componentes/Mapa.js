@@ -414,8 +414,10 @@ function MarcadorEvento({ marcador, s }) {
 // "coleta" (opcional): missão de órgãos, o hospital onde o órgão é retirado (a rota passa por ele)
 // "outrosDrones" (opcional): drones da rede voando ao mesmo tempo
 //   [{ id, x, y, altitude, cor, rota: { origem, destino }, comParaquedas }]
+// "pontosEntrega" (opcional): outros pontos de entrega para marcar (os abrigos de uma operação)
 export default function Mapa({
   marcadores = [],
+  pontosEntrega = [],
   outrosDrones = [],
   coleta,
   destino,
@@ -672,7 +674,12 @@ export default function Mapa({
         ))}
 
         {/* Destino livre (escolhido tocando no mapa) */}
-        {destinoLivre && <MarcadorDestino destino={destino} s={s} texto={destino.tipo === 'bairro' ? destino.nome : 'Destino'} />}
+        {destinoLivre && <MarcadorDestino destino={destino} s={s} texto={destino.rotulo || 'Destino'} />}
+        {pontosEntrega
+          .filter((ponto) => !destino || ponto.id !== destino.id)
+          .map((ponto) => (
+            <MarcadorDestino key={ponto.id} destino={ponto} s={s} texto={ponto.rotulo} />
+          ))}
         {coletaLivre && <MarcadorDestino destino={coleta} s={s} texto={coleta.rotulo || 'Coleta'} cor="#00897B" />}
 
         {/* Eventos planejados: onde cada um vai acontecer na rota */}

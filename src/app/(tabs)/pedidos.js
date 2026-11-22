@@ -10,6 +10,7 @@ import PedidoDelivery from '../../componentes/PedidoDelivery';
 import PedidoOrgao from '../../componentes/PedidoOrgao';
 import PedidoRemedio from '../../componentes/PedidoRemedio';
 import PedidoSocorro from '../../componentes/PedidoSocorro';
+import PedidosProntos from '../../componentes/PedidosProntos';
 import Secao from '../../componentes/Secao';
 import TelaLogin from '../../componentes/TelaLogin';
 import { TEMA } from '../../componentes/tema';
@@ -105,6 +106,8 @@ export default function Pedidos() {
               acompanhar o drone.
             </Text>
           ) : null}
+
+          <PedidosProntos pode={perfil.pode} aoPedir={pedir} />
 
           {Formulario ? <Formulario key={`${tipo}-${versaoFormulario}`} aoPedir={pedir} /> : null}
 

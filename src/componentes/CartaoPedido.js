@@ -7,7 +7,8 @@ import { TEMA } from './tema';
 // "mostrarQuem": na fila da Central, mostra também quem pediu
 export default function CartaoPedido({ pedido, aoVerVoo, mostrarQuem = false }) {
   const missao = MISSOES.find((opcao) => opcao.valor === pedido.prioridade);
-  const caminho = pedido.coleta ? `${pedido.coleta.nome} → ${pedido.destino.nome}` : `Filial → ${pedido.destino.nome}`;
+  let caminho = pedido.coleta ? `${pedido.coleta.nome} → ${pedido.destino.nome}` : `Filial → ${pedido.destino.nome}`;
+  if (pedido.operacao) caminho = `${pedido.operacao.drones.length} drones → ${pedido.operacao.abrigos.length} abrigos ao mesmo tempo`;
 
   return (
     <View style={[styles.cartao, { borderLeftColor: missao.cor }]}>

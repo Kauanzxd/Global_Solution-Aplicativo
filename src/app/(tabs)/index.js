@@ -52,6 +52,11 @@ function temColeta(configuracao) {
 //   com coleta: [filial, coleta, entrega, filial] (sai da filial mais perto da coleta e
 //   volta à filial mais perto da entrega).
 function percursoDa(configuracao) {
+  // Operação de emergência: o drone principal tem filial definida pela Central
+  if (configuracao.operacao) {
+    const principal = configuracao.operacao.drones[0];
+    return [principal.origem, principal.destino, principal.origem];
+  }
   if (temColeta(configuracao)) {
     const { coleta, destino } = configuracao;
     return [filialDaMissao(coleta), coleta, destino, filialDaMissao(destino)];
@@ -190,6 +195,8 @@ function marcadoresDosEventos(eventos, paradas) {
 function criarVoo(configuracao) {
   const [filial] = percursoDa(configuracao);
   return {
+    // Na operação de emergência, o drone principal tem nome de rádio (os outros também)
+    idDrone: configuracao.operacao ? configuracao.operacao.drones[0].idDrone : undefined,
     origem: filial,
     destino: configuracao.destino,
     // Com coleta: o voo passa antes pelo ponto da coleta (veja voo.js)
@@ -303,6 +310,7 @@ export default function Simular() {
       eventos: [],
       trafego: 0,
       pedido: pedidoParaVoar,
+      operacao: pedidoParaVoar.operacao || null,
     };
     setConfiguracao(nova);
     setCenario(null);
@@ -312,9 +320,17 @@ export default function Simular() {
     setPedidoParaVoar(null);
   }, [pedidoParaVoar]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // O voo de um pedido terminou: o status do pedido passa a ser o resultado do voo
+  // O voo de um pedido terminou: o status do pedido passa a ser o resultado do voo.
+  // Numa operação com vários drones, só termina quando TODOS pousam: conta os abrigos atendidos.
+  const outrosNoAr = outros.filter((outro) => estaNoAr(outro)).length;
   useEffect(() => {
     if (voo === null || emVoo || !configuracao.pedido) return;
+    if (configuracao.operacao) {
+      if (outrosNoAr > 0) return;
+      const entregues = [voo, ...outros].filter((drone) => drone.etapa === 'volta' || drone.situacao === 'missao-concluida').length;
+      atualizarStatus(configuracao.pedido.codigo, `Operação concluída: ${entregues} de ${outros.length + 1} abrigos atendidos`);
+      return;
+    }
     const STATUS_FINAL = {
       'missao-concluida': 'Entregue',
       'pouso-emergencia': 'Pouso de emergência seguro',
@@ -325,7 +341,7 @@ export default function Simular() {
       'decolagem-negada': 'Decolagem negada: outro meio de transporte',
     };
     atualizarStatus(configuracao.pedido.codigo, STATUS_FINAL[voo.situacao] || 'Voo encerrado');
-  }, [emVoo, voo?.situacao]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [emVoo, voo?.situacao, outrosNoAr]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const carregarCenario = (escolhido) => {
     const nova = configuracaoDoCenario(escolhido);
@@ -362,7 +378,12 @@ export default function Simular() {
     zonas: ZONAS_E_FILIAIS,
     areas: AREAS,
     vias: VIAS,
-    locais: destinoLivre ? [...HOSPITAIS_DO_MAPA, configuracao.destino] : HOSPITAIS_DO_MAPA,
+    // Na operação, os abrigos (cheios de gente) também ficam fora das escolhas de pouso de emergência
+    locais: [
+      ...HOSPITAIS_DO_MAPA,
+      ...(destinoLivre ? [configuracao.destino] : []),
+      ...(configuracao.operacao ? configuracao.operacao.abrigos : []),
+    ],
   };
   // Ida = da filial até a entrega (passando pela coleta, nos órgãos); volta = o último trecho
   const distanciaIda = tamanhoDe(paradas.slice(0, -1));
@@ -371,13 +392,16 @@ export default function Simular() {
   const eventos = eventosParaOVoo(configuracao.eventos, distanciaIda + distanciaVolta);
 
   // Os outros drones que vão voar junto: rotas que cruzam a ida do principal
-  const extrasPlanejados = montarRede(
-    paradas,
-    configuracao.trafego,
-    FILIAIS_DO_MAPA,
-    HOSPITAIS_DO_MAPA,
-    comColeta ? [configuracao.destino, configuracao.coleta] : [configuracao.destino]
-  );
+  // (numa operação de emergência, são os outros drones que a Central acionou)
+  const extrasPlanejados = configuracao.operacao
+    ? configuracao.operacao.drones.slice(1)
+    : montarRede(
+        paradas,
+        configuracao.trafego,
+        FILIAIS_DO_MAPA,
+        HOSPITAIS_DO_MAPA,
+        comColeta ? [configuracao.destino, configuracao.coleta] : [configuracao.destino]
+      );
 
   // O relógio lê o estado mais recente por estas "referências" (o setInterval guardaria
   // uma cópia velha do voo e dos outros drones se lesse direto das variáveis)
@@ -441,6 +465,27 @@ export default function Simular() {
 
   const missao = MISSOES.find((m) => m.valor === configuracao.prioridade);
 
+  // A ocorrência e o plano da Central de uma operação de emergência (em cima, na montagem;
+  // embaixo do painel dos drones, durante o voo)
+  const blocoOcorrencia = configuracao.operacao ? (
+    <Secao titulo="Ocorrência" dica={configuracao.operacao.titulo}>
+      <Text style={styles.textoOcorrencia}>{configuracao.operacao.ocorrencia}</Text>
+      <Text style={styles.tituloPlano}>Plano da Central de Operações</Text>
+      {configuracao.operacao.plano.map((passo, indice) => (
+        <Text key={indice} style={styles.passoPlano}>
+          {indice + 1}. {passo}
+        </Text>
+      ))}
+      <Text style={styles.tituloPlano}>Drones acionados</Text>
+      {configuracao.operacao.drones.map((drone) => (
+        <Text key={drone.idDrone} style={styles.passoPlano}>
+          <Text style={{ color: drone.cor, fontWeight: '800' }}>● </Text>
+          {drone.idDrone} · {drone.origem.nome} → {drone.destino.nome}: {drone.suprimento}
+        </Text>
+      ))}
+    </Secao>
+  ) : null;
+
   return (
     <ScrollView style={styles.tela} contentContainerStyle={[styles.conteudo, { paddingTop: margens.top + 20 }]}>
       <Cabecalho titulo="Simular voo" subtitulo="Monte uma situação e veja o drone em ação" />
@@ -448,6 +493,7 @@ export default function Simular() {
       <View style={styles.areaMapa}>
         <Mapa
           coleta={comColeta ? configuracao.coleta : undefined}
+          pontosEntrega={configuracao.operacao ? configuracao.operacao.abrigos : []}
           destino={configuracao.destino}
           origem={voo ? voo.hub || voo.origem : origem}
           centro={voo === null && foco ? foco.centro : undefined}
@@ -474,7 +520,7 @@ export default function Simular() {
             x: posicaoNaRota(outro.origem, outro.destino, outro.km).x,
             y: posicaoNaRota(outro.origem, outro.destino, outro.km).y,
             altitude: outro.espera > 0 ? 0 : altitudeDoVoo(outro),
-            cor: DRONES_DA_REDE[indice].cor,
+            cor: (extrasPlanejados[indice] && extrasPlanejados[indice].cor) || DRONES_DA_REDE[indice % DRONES_DA_REDE.length].cor,
             rota: { origem: outro.hub || outro.origem, destino: outro.destinoFinal || outro.destino },
             comParaquedas: Boolean(outro.paraquedasAberto) && altitudeDoVoo(outro) > 0,
           }))}
@@ -491,6 +537,9 @@ export default function Simular() {
         </Pressable>
       </View>
       {mostrarLegenda ? <LegendaMapa /> : null}
+
+      {/* Operação de emergência: a ocorrência e o plano da Central (montando: aqui em cima) */}
+      {voo === null ? blocoOcorrencia : null}
 
       {/* Simulação montada a partir de um pedido da aba Pedidos */}
       {configuracao.pedido ? (
@@ -600,6 +649,7 @@ export default function Simular() {
             />
           </Secao>
 
+          {configuracao.operacao ? null : (
           <Secao
             titulo="Outros drones no ar"
             dica="Drones da rede voando ao mesmo tempo, com rotas que cruzam a sua: eles se enxergam e combinam pelo rádio quem desvia"
@@ -616,6 +666,7 @@ export default function Simular() {
               </Text>
             ) : null}
           </Secao>
+          )}
 
           <Pressable
             style={[styles.botao, !podeIniciar && styles.botaoDesligado]}
@@ -639,10 +690,14 @@ export default function Simular() {
             {(voo.hub || voo.origem).nome} → {comColeta ? `${configuracao.coleta.rotulo} → ` : ''}
             {configuracao.destino.rotulo}
           </Text>
-          <Text style={styles.status}>{voo.mensagem}</Text>
+          <Text style={styles.status}>
+            {configuracao.operacao ? `${voo.idDrone}: ` : ''}
+            {voo.mensagem}
+          </Text>
           <Text style={styles.bateria}>Bateria: {Math.round(voo.bateria)}%</Text>
-          {outros.map((outro) => (
+          {outros.map((outro, indice) => (
             <Text key={outro.idDrone} style={styles.itemRede}>
+              <Text style={{ color: (extrasPlanejados[indice] && extrasPlanejados[indice].cor) || TEMA.marca, fontWeight: '800' }}>● </Text>
               {outro.idDrone} ({NOME_MISSAO[outro.prioridade] || outro.prioridade}): {outro.espera > 0 ? 'aguardando a vez na filial' : outro.mensagem}
             </Text>
           ))}
@@ -651,6 +706,9 @@ export default function Simular() {
           </Pressable>
         </View>
       )}
+
+      {/* Durante e depois do voo, a ocorrência vem embaixo do painel dos drones */}
+      {voo !== null ? blocoOcorrencia : null}
 
       {/* Voo terminado: o resumo (resultado, distância, tempo, bateria e como foi o voo) */}
       {voo !== null && !emVoo ? (
@@ -823,6 +881,24 @@ const styles = StyleSheet.create({
   },
   textoSecundario: {
     color: TEMA.marca,
+  },
+  textoOcorrencia: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: TEMA.texto,
+  },
+  tituloPlano: {
+    marginTop: 14,
+    marginBottom: 4,
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEMA.texto,
+  },
+  passoPlano: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    color: TEMA.texto,
   },
   avisoPedido: {
     marginTop: 12,
