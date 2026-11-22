@@ -108,13 +108,18 @@ export function criarVooDaRede(extra) {
     const km = Math.min(extra.adiantadoKm, distanciaKm(extra.origem, extra.destino) - 1);
     return { ...base, km, hodometro: km, altitude: 120, situacao: 'voando', mensagem: 'Voando...' };
   }
-  return { ...base, km: 0, altitude: 0, situacao: 'decolando', mensagem: 'Aguardando a vez na filial' };
+  const mensagem = extra.espera > 0 ? `Na ${extra.origem.nome || 'filial'}, aguardando a vez de decolar` : 'Decolando...';
+  return { ...base, km: 0, altitude: 0, situacao: 'decolando', mensagem };
 }
 
-// Avança os extras um tique. Quem ainda espera na filial só desconta a espera.
+// Avança os extras um tique. Quem ainda espera na filial só desconta a espera; quando a
+// espera acaba, é a vez dele: avisa no rádio que está decolando.
 export function avancarRede(voos, passoKm, regiao) {
   return voos.map((voo) => {
-    if (voo.espera > 0) return { ...voo, espera: voo.espera - passoKm };
+    if (voo.espera > 0) {
+      const espera = voo.espera - passoKm;
+      return espera > 0 ? { ...voo, espera } : { ...voo, espera, mensagem: 'Decolando, é a minha vez' };
+    }
     return avancarVoo(voo, passoKm, [], regiao);
   });
 }

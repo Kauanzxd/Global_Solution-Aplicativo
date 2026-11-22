@@ -10,9 +10,6 @@ import { chiadoDeAbertura, decodificarAudio, tocarComoRadio } from './somDeRadio
 
 const IDIOMA = 'pt-BR';
 const RITMO = 1.4; // bem mais rápido que o normal, como a fala de rádio (e para não atrasar em relação ao mapa)
-// Mensagens de rotina que a voz fala (os marcos do voo). As outras ("Voando...",
-// "Voltando...", "Sobre o destino...") aparecem só no texto, para a voz não ficar para trás.
-const ROTINA_FALADA = /^(Decolando|Entrega feita!|Missão concluída|Simulação iniciada)/;
 
 // Cada drone fala com uma voz diferente (quando o aparelho tem mais de uma em português)
 // e um tom levemente diferente. Tons muito altos ou baixos deixam a voz robótica: por isso
@@ -184,16 +181,16 @@ export default function useVozDoRadio({ aoMostrar }) {
   };
 
   // Coloca mensagens na fila. "mensagens": [{ id, nome, cor, texto, evento, parte }]
-  // Todas entram (para o texto sair na ordem certa), mas só algumas são faladas:
-  //   - no relato, só o começo ("checando zonas") e a decisão; as zonas checadas são só texto;
-  //   - na rotina, só os marcos do voo (ROTINA_FALADA).
+  // Todas entram (para o texto sair na ordem certa) e todas são faladas, menos as zonas
+  // checadas no meio de um relato (a voz fala só "checando zonas" e a decisão).
+  // Se a voz atrasar, a simulação espera (veja atrasoDaVoz).
   const falar = (mensagens) => {
     if (!ligadaRef.current) {
       mensagens.forEach((mensagem) => aoMostrarRef.current(mensagem)); // voz desligada: só texto
       return;
     }
     mensagens.forEach((mensagem) => {
-      const vaiFalar = mensagem.parte !== 'meio' && (mensagem.evento || ROTINA_FALADA.test(mensagem.texto));
+      const vaiFalar = mensagem.parte !== 'meio';
       const falado = vaiFalar ? textoParaFala(fraseDeRadio(mensagem)) : null;
       // o áudio da nuvem começa a baixar já, para estar pronto quando chegar a vez
       const audio = falado ? buscarAudio(falado, vozDaNuvem(mensagem.nome)) : null;

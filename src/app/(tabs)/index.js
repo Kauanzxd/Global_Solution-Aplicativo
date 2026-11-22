@@ -150,7 +150,7 @@ const VELOCIDADE_CAMERA_LENTA = 0.1;
 const VELOCIDADE_ESPERANDO_RADIO = 0.03;
 const DURACAO_CAMERA_LENTA_MS = 3500;
 // Mensagens de rotina (decolar, voar, entregar, voltar) não são eventos: não ligam a câmera lenta
-const ROTINA = /^(Decolando|Voando|Voltando para|Aguardando|Sobre |Pousou no ponto|Entrega feita!|Missão concluída|Desviando pela direita|Desvio concluído)|coletad[oa]! Decolando/;
+const ROTINA = /^(Decolando|Voando|Voltando para|Aguardando|Sobre |Pousou no ponto|Entrega feita!|Missão concluída|Desviando pela direita|Desvio concluído)|coletad[oa]! Decolando|aguardando a vez de decolar/;
 const ehEvento = (texto) => !ROTINA.test(texto);
 const DECISOES_POR_TIQUE = 4; // 4 decisões por atualização da tela: reage mais rápido
 
@@ -310,7 +310,12 @@ export default function Simular() {
     // A primeira fala sai aqui, no toque do botão: no iPhone e no navegador, a voz só é
     // liberada se começar por um toque do usuário
     voz.parar();
-    voz.falar([{ id: `central-${Date.now()}`, nome: 'Central SADEC', cor: TEMA.marca, texto: 'Simulação iniciada', evento: false }]);
+    // Numa operação, a Central anuncia a ocorrência e quantos drones foram acionados
+    const operacao = configuracao.operacao;
+    const abertura = operacao
+      ? `${operacao.titulo}. ${operacao.drones.length} drones acionados, saídas escalonadas por filial.`
+      : 'Simulação iniciada';
+    voz.falar([{ id: `central-${Date.now()}`, nome: 'Central SADEC', cor: TEMA.marca, texto: abertura, evento: false }]);
     // A tela sobe até o mapa logo depois que o painel do voo aparecer (veja o useEffect abaixo)
     subirAoMapa.current = true;
     setOutros(extrasPlanejados.map(criarVooDaRede));
@@ -528,7 +533,7 @@ export default function Simular() {
       [principal, ...rede].forEach((drone, indice) => {
         const nome = drone.idDrone || 'SADEC-01';
         const chave = semNumeros(drone.mensagem);
-        if (!drone.mensagem || ultimaDoDrone.current[nome] === chave || (drone.espera > 0)) return;
+        if (!drone.mensagem || ultimaDoDrone.current[nome] === chave) return;
         ultimaDoDrone.current[nome] = chave;
         const cor = indice === 0 ? '#0B1F33' : (extrasPlanejados[indice - 1] && extrasPlanejados[indice - 1].cor) || TEMA.marca;
         // Numa emergência com relato (zonas checadas e decisão), o rádio conta linha por linha
