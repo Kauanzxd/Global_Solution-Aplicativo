@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BuscaDestino from '../../componentes/BuscaDestino';
 import Cabecalho from '../../componentes/Cabecalho';
+import { usePedidos } from '../../componentes/ContextoPedidos';
 import CenariosProntos from '../../componentes/CenariosProntos';
 import Contador from '../../componentes/Contador';
 import EditorEventos from '../../componentes/EditorEventos';
@@ -41,17 +42,17 @@ function filialDaMissao(destino) {
   );
 }
 
-// Missão de órgãos? Só quando o tipo é órgãos E há um hospital de coleta escolhido
-function ehMissaoOrgao(configuracao) {
-  return configuracao.prioridade === 'orgaos' && Boolean(configuracao.coleta);
+// A missão tem um ponto de coleta? (o hospital do órgão, ou a loja/farmácia de um pedido)
+function temColeta(configuracao) {
+  return Boolean(configuracao.coleta);
 }
 
 // As paradas da missão, da filial de saída até a filial de chegada:
 //   entrega normal: [filial, destino, filial] (sai da filial mais perto do destino e volta a ela);
-//   órgãos: [filial, coleta, entrega, filial] (sai da filial mais perto da coleta e
-//   volta à filial mais perto do hospital da entrega).
+//   com coleta: [filial, coleta, entrega, filial] (sai da filial mais perto da coleta e
+//   volta à filial mais perto da entrega).
 function percursoDa(configuracao) {
-  if (ehMissaoOrgao(configuracao)) {
+  if (temColeta(configuracao)) {
     const { coleta, destino } = configuracao;
     return [filialDaMissao(coleta), coleta, destino, filialDaMissao(destino)];
   }
@@ -136,9 +137,11 @@ function focoDaRota(configuracao) {
 // O destino escolhido é válido? Devolve o problema em texto, ou null se estiver tudo certo.
 function problemaDoDestino(configuracao, origem) {
   const { destino } = configuracao;
-  if (ehMissaoOrgao(configuracao)) {
-    if (destino.tipo !== 'hospital') return 'O órgão precisa ser entregue num hospital: escolha um hospital como destino.';
-    if (destino.id === configuracao.coleta.id) return 'A coleta e a entrega estão no mesmo hospital: escolha hospitais diferentes.';
+  if (temColeta(configuracao)) {
+    if (configuracao.prioridade === 'orgaos' && destino.tipo !== 'hospital') {
+      return 'O órgão precisa ser entregue num hospital: escolha um hospital como destino.';
+    }
+    if (destino.id === configuracao.coleta.id) return 'A coleta e a entrega estão no mesmo lugar: escolha lugares diferentes.';
     return null;
   }
   if (distanciaKm(origem, destino) < 0.3) return 'O destino está colado na filial: escolha um ponto mais longe.';
@@ -189,8 +192,8 @@ function criarVoo(configuracao) {
   return {
     origem: filial,
     destino: configuracao.destino,
-    // Missão de órgãos: o voo passa antes pelo hospital da coleta (veja voo.js)
-    coleta: ehMissaoOrgao(configuracao) ? configuracao.coleta : undefined,
+    // Com coleta: o voo passa antes pelo ponto da coleta (veja voo.js)
+    coleta: temColeta(configuracao) ? configuracao.coleta : undefined,
     km: 0,
     altitude: 0,
     bateria: configuracao.bateria,
@@ -229,11 +232,15 @@ export default function Simular() {
   // Outros drones da rede voando ao mesmo tempo (cada um é um voo de verdade)
   const [outros, setOutros] = useState([]);
 
+  // Pedidos feitos na aba Pedidos: um deles pode chegar aqui para virar o voo
+  const { pedidoParaVoar, setPedidoParaVoar, atualizarStatus } = usePedidos();
+
   // Começa um voo novo (e esvazia os momentos do voo anterior)
   const iniciar = () => {
     setEtapasDoVoo([]);
     setOutros(extrasPlanejados.map(criarVooDaRede));
     setVoo(criarVoo(configuracao));
+    if (configuracao.pedido) atualizarStatus(configuracao.pedido.codigo, 'Em voo');
   };
 
   // Volta para a montagem (interrompe o voo e tira os outros drones do mapa)
@@ -273,13 +280,52 @@ export default function Simular() {
 
   // Trocou o tipo de entrega. Ao escolher "Órgãos" pela primeira vez, já sugere um
   // hospital de coleta (dá para trocar logo abaixo).
+  // Saindo de "Órgãos", a coleta some (a não ser num pedido, que tem a loja ou a farmácia).
   const escolherTipo = (prioridade) => {
-    const coleta =
-      prioridade === 'orgaos' ? configuracao.coleta || coletaSugerida(configuracao.destino) : configuracao.coleta;
+    const atual = configuracao.coleta;
+    let coleta = null;
+    if (prioridade === 'orgaos') coleta = atual && atual.tipo === 'hospital' ? atual : coletaSugerida(configuracao.destino);
+    else if (configuracao.pedido) coleta = atual;
     setConfiguracao((atual) => ({ ...atual, prioridade, coleta }));
     setCenario(null);
     setFoco(focoDaRota({ ...configuracao, prioridade, coleta }));
   };
+
+  // Chegou um pedido da aba Pedidos: ele vira a configuração da simulação (coleta, entrega,
+  // tipo e a bateria sugerida). Daí dá para iniciar o voo, ou ainda pôr eventos e outros drones.
+  useEffect(() => {
+    if (!pedidoParaVoar) return;
+    const nova = {
+      destino: pedidoParaVoar.destino,
+      coleta: pedidoParaVoar.coleta,
+      prioridade: pedidoParaVoar.prioridade,
+      bateria: pedidoParaVoar.bateria,
+      eventos: [],
+      trafego: 0,
+      pedido: pedidoParaVoar,
+    };
+    setConfiguracao(nova);
+    setCenario(null);
+    setVoo(null);
+    setOutros([]);
+    setFoco(focoDaRota(nova));
+    setPedidoParaVoar(null);
+  }, [pedidoParaVoar]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // O voo de um pedido terminou: o status do pedido passa a ser o resultado do voo
+  useEffect(() => {
+    if (voo === null || emVoo || !configuracao.pedido) return;
+    const STATUS_FINAL = {
+      'missao-concluida': 'Entregue',
+      'pouso-emergencia': 'Pouso de emergência seguro',
+      'pouso-paraquedas': 'Pouso de paraquedas: aguardando resgate',
+      'aguardando-resgate': 'Aguardando resgate',
+      'pousou-hub': 'Voltou à filial na decolagem',
+      queda: 'Queda dentro da filial',
+      'decolagem-negada': 'Decolagem negada: outro meio de transporte',
+    };
+    atualizarStatus(configuracao.pedido.codigo, STATUS_FINAL[voo.situacao] || 'Voo encerrado');
+  }, [emVoo, voo?.situacao]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const carregarCenario = (escolhido) => {
     const nova = configuracaoDoCenario(escolhido);
@@ -304,7 +350,8 @@ export default function Simular() {
     mudar('destino', escolhido || { id: 'ponto-livre', nome: 'Ponto no mapa', rotulo: 'Ponto no mapa', ...ponto });
   };
 
-  const orgao = ehMissaoOrgao(configuracao);
+  const comColeta = temColeta(configuracao);
+  const orgao = comColeta && configuracao.prioridade === 'orgaos';
   const paradas = percursoDa(configuracao);
   const origem = paradas[0];
 
@@ -320,7 +367,7 @@ export default function Simular() {
   // Ida = da filial até a entrega (passando pela coleta, nos órgãos); volta = o último trecho
   const distanciaIda = tamanhoDe(paradas.slice(0, -1));
   const distanciaVolta = distanciaKm(paradas[paradas.length - 2], paradas[paradas.length - 1]);
-  const kmColeta = orgao ? distanciaKm(origem, configuracao.coleta) : undefined;
+  const kmColeta = comColeta ? distanciaKm(origem, configuracao.coleta) : undefined;
   const eventos = eventosParaOVoo(configuracao.eventos, distanciaIda + distanciaVolta);
 
   // Os outros drones que vão voar junto: rotas que cruzam a ida do principal
@@ -329,7 +376,7 @@ export default function Simular() {
     configuracao.trafego,
     FILIAIS_DO_MAPA,
     HOSPITAIS_DO_MAPA,
-    orgao ? [configuracao.destino, configuracao.coleta] : [configuracao.destino]
+    comColeta ? [configuracao.destino, configuracao.coleta] : [configuracao.destino]
   );
 
   // O relógio lê o estado mais recente por estas "referências" (o setInterval guardaria
@@ -400,7 +447,7 @@ export default function Simular() {
 
       <View style={styles.areaMapa}>
         <Mapa
-          coleta={orgao ? configuracao.coleta : undefined}
+          coleta={comColeta ? configuracao.coleta : undefined}
           destino={configuracao.destino}
           origem={voo ? voo.hub || voo.origem : origem}
           centro={voo === null && foco ? foco.centro : undefined}
@@ -445,6 +492,14 @@ export default function Simular() {
       </View>
       {mostrarLegenda ? <LegendaMapa /> : null}
 
+      {/* Simulação montada a partir de um pedido da aba Pedidos */}
+      {configuracao.pedido ? (
+        <Text style={styles.avisoPedido}>
+          Pedido {configuracao.pedido.codigo} · {configuracao.pedido.titulo}
+          {voo === null ? '. Toque em "Iniciar simulação" para ver o drone entregar.' : ''}
+        </Text>
+      ) : null}
+
       {voo === null ? (
         // ---------- MONTANDO A SIMULAÇÃO ----------
         <View>
@@ -476,7 +531,7 @@ export default function Simular() {
           <Secao
             titulo={orgao ? 'Hospital da entrega' : 'Destino'}
             dica={
-              orgao
+              comColeta
                 ? `Sai da ${origem.nome}, a filial mais próxima da coleta · ${km1(distanciaIda)} km até a entrega`
                 : `Sai da ${origem.nome}, a filial mais próxima · ${km1(distanciaIda)} km (ida)`
             }
@@ -493,19 +548,22 @@ export default function Simular() {
             <Opcoes opcoes={MISSOES} valor={configuracao.prioridade} aoEscolher={escolherTipo} />
           </Secao>
 
-          {orgao ? (
-            <Secao titulo="Hospital da coleta" dica="Onde o órgão é retirado: o drone pousa ali antes de seguir para a entrega">
+          {comColeta ? (
+            <Secao
+              titulo={orgao ? 'Hospital da coleta' : 'Ponto da coleta'}
+              dica={orgao ? 'Onde o órgão é retirado: o drone pousa ali antes de seguir para a entrega' : 'Onde o drone retira o pedido antes de seguir para a entrega'}
+            >
               <View style={styles.destinoAtual}>
                 <Text style={styles.destinoNome}>{configuracao.coleta.nome}</Text>
                 {configuracao.coleta.bairro ? <Text style={styles.destinoBairro}>{configuracao.coleta.bairro}</Text> : null}
               </View>
-              <BuscaDestino locais={HOSPITAIS_DO_MAPA} aoEscolher={escolherColeta} />
+              {orgao ? <BuscaDestino locais={HOSPITAIS_DO_MAPA} aoEscolher={escolherColeta} /> : null}
             </Secao>
           ) : null}
 
           <Secao
             titulo="Bateria na decolagem"
-            dica={`Esta rota precisa de ${precisa}% (${orgao ? 'coleta + entrega + volta' : 'ida + volta'} + 30% de margem)`}
+            dica={`Esta rota precisa de ${precisa}% (${comColeta ? 'coleta + entrega + volta' : 'ida + volta'} + 30% de margem)`}
           >
             <View style={styles.linhaBateria}>
               <Contador valor={configuracao.bateria} passo={5} minimo={10} maximo={100} sufixo="%" aoMudar={(valor) => mudar('bateria', valor)} />
@@ -528,7 +586,7 @@ export default function Simular() {
           <Secao
             titulo={`Eventos (${configuracao.eventos.length})`}
             dica={
-              orgao
+              comColeta
                 ? `Coleta no km ${km1(kmColeta)} · Entrega no km ${km1(distanciaIda)} · Volta: até o km ${km1(distanciaIda + distanciaVolta)}`
                 : `Ida: km 0 a ${km1(distanciaIda)} · Volta: até o km ${km1(distanciaIda + distanciaVolta)}`
             }
@@ -578,7 +636,7 @@ export default function Simular() {
           <Text style={[styles.missao, { color: missao.cor }]}>{missao.rotulo}</Text>
           {/* voo.hub guarda a filial de saída (voo.origem muda a cada trecho do voo) */}
           <Text style={styles.trajeto}>
-            {(voo.hub || voo.origem).nome} → {orgao ? `${configuracao.coleta.rotulo} → ` : ''}
+            {(voo.hub || voo.origem).nome} → {comColeta ? `${configuracao.coleta.rotulo} → ` : ''}
             {configuracao.destino.rotulo}
           </Text>
           <Text style={styles.status}>{voo.mensagem}</Text>
@@ -765,6 +823,16 @@ const styles = StyleSheet.create({
   },
   textoSecundario: {
     color: TEMA.marca,
+  },
+  avisoPedido: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: TEMA.marcaClara,
+    color: TEMA.marca,
+    fontSize: 14,
+    fontWeight: '600',
+    overflow: 'hidden',
   },
   itemRede: {
     marginTop: 8,

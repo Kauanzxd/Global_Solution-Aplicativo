@@ -7,6 +7,8 @@ const ITENS = [
   { simbolo: 'letra', cor: '#0B5CAD', letra: 'F', texto: 'Filial da SADEC (de onde os drones saem)' },
   { simbolo: 'letra', cor: '#D32F2F', letra: 'H', texto: 'Hospital' },
   { simbolo: 'zona', cor: '#E08A00', letra: 'ZP', texto: 'Zona de pouso seguro (nos parques)' },
+  { simbolo: 'alfinete', cor: '#00897B', texto: 'Ponto de coleta de um pedido (loja ou farmácia)' },
+  { simbolo: 'alfinete', cor: '#E0457B', texto: 'Destino escolhido (bairro ou ponto no mapa)' },
   { simbolo: 'linha', cor: '#0B5CAD', tracejado: true, texto: 'Rota do drone' },
   { simbolo: 'linha', cor: '#E08A00', tracejado: true, texto: 'Desvio de emergência' },
   { simbolo: 'ponto', cor: '#6A1B9A', texto: 'Evento planejado (número = ordem na lista)' },
@@ -28,6 +30,8 @@ function Simbolo({ item }) {
       </View>
     );
   }
+  // Alfinete: uma gota com a ponta para baixo (um quadrado girado com um canto reto)
+  if (item.simbolo === 'alfinete') return <View style={[styles.alfinete, { backgroundColor: item.cor }]} />;
   if (item.simbolo === 'ponto') return <View style={[styles.ponto, { backgroundColor: item.cor }]} />;
   if (item.simbolo === 'area') return <View style={[styles.area, { backgroundColor: item.cor }]} />;
   // Linha: contínua, grossa ou tracejada (três pedacinhos)
@@ -95,6 +99,14 @@ const styles = StyleSheet.create({
   letra: {
     fontSize: 10,
     fontWeight: '800',
+  },
+  alfinete: {
+    width: 14,
+    height: 14,
+    borderTopLeftRadius: 7,
+    borderTopRightRadius: 7,
+    borderBottomLeftRadius: 7,
+    transform: [{ rotate: '45deg' }],
   },
   ponto: {
     width: 14,

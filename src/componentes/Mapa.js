@@ -362,7 +362,9 @@ function Guindaste({ base, ponta, s }) {
 }
 
 // Destino escolhido livremente no mapa (não é um dos locais conhecidos): um alfinete
-function MarcadorDestino({ destino, s }) {
+// "texto" e "cor" (opcionais): o nome embaixo do alfinete e a cor dele. A coleta de um pedido
+// (loja ou farmácia, que não estão nos LOCAIS) usa o mesmo alfinete, em outra cor.
+function MarcadorDestino({ destino, s, texto = 'Destino', cor = '#E0457B' }) {
   const x = destino.x * ESCALA;
   const y = destino.y * ESCALA;
   return (
@@ -370,12 +372,12 @@ function MarcadorDestino({ destino, s }) {
       {/* O alfinete: uma gota (curva) com a ponta no ponto exato */}
       <Path
         d={`M ${x} ${y} C ${x - 2.6 * s} ${y - 3.2 * s} ${x - 2.6 * s} ${y - 6 * s} ${x} ${y - 6 * s} C ${x + 2.6 * s} ${y - 6 * s} ${x + 2.6 * s} ${y - 3.2 * s} ${x} ${y} Z`}
-        fill="#E0457B"
+        fill={cor}
         stroke="#FFFFFF"
         strokeWidth={0.4 * s}
       />
       <Circle cx={x} cy={y - 4.2 * s} r={0.9 * s} fill="#FFFFFF" />
-      <Rotulo x={x} y={y + 3 * s} texto="Destino" tamanho={2.2} s={s} />
+      <Rotulo x={x} y={y + 3 * s} texto={texto} tamanho={2.2} s={s} />
     </G>
   );
 }
@@ -496,6 +498,8 @@ export default function Mapa({
 
   // O destino é um ponto livre (não é um dos locais conhecidos)?
   const destinoLivre = destino && !LOCAIS.some((local) => local.id === destino.id);
+  // A coleta também pode estar fora dos LOCAIS (a loja ou a farmácia de um pedido)
+  const coletaLivre = coleta && !LOCAIS.some((local) => local.id === coleta.id);
 
   return (
     <Pressable ref={caixa} style={styles.caixa} onPress={tocar} disabled={!aoTocar}>
@@ -668,7 +672,8 @@ export default function Mapa({
         ))}
 
         {/* Destino livre (escolhido tocando no mapa) */}
-        {destinoLivre && <MarcadorDestino destino={destino} s={s} />}
+        {destinoLivre && <MarcadorDestino destino={destino} s={s} texto={destino.tipo === 'bairro' ? destino.nome : 'Destino'} />}
+        {coletaLivre && <MarcadorDestino destino={coleta} s={s} texto={coleta.rotulo || 'Coleta'} cor="#00897B" />}
 
         {/* Eventos planejados: onde cada um vai acontecer na rota */}
         {marcadores.map((marcador) => (
