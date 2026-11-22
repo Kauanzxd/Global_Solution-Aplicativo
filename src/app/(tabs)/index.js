@@ -8,6 +8,7 @@ import CenariosProntos from '../../componentes/CenariosProntos';
 import Contador from '../../componentes/Contador';
 import EditorEventos from '../../componentes/EditorEventos';
 import LegendaMapa from '../../componentes/LegendaMapa';
+import LogDoRadio from '../../componentes/LogDoRadio';
 import Mapa from '../../componentes/Mapa';
 import Opcoes from '../../componentes/Opcoes';
 import ResumoVoo from '../../componentes/ResumoVoo';
@@ -123,9 +124,22 @@ const VISTA_VOO = 10 * UNIDADES_POR_KM; // voando: 10 km em volta do drone, segu
 const VISTA_APROXIMADA = 1.2 * UNIDADES_POR_KM; // obstáculo a até 1 km: só 1,2 km em volta
 const RAIO_ZOOM_KM = 1;
 
-const KM_POR_SEGUNDO = 1; // velocidade acelerada, para a demonstração não demorar
+const KM_POR_SEGUNDO = 1; // velocidade "1×": acelerada, para a demonstração não demorar
 const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
 const PASSO_KM = KM_POR_SEGUNDO * (PASSO_MS / 1000);
+
+// Velocidades da simulação (multiplicam o passo). Com vários drones, mais devagar se entende melhor.
+const VELOCIDADES = [
+  { valor: 0.25, rotulo: '0,25×' },
+  { valor: 0.5, rotulo: '0,5×' },
+  { valor: 1, rotulo: '1×' },
+  { valor: 2, rotulo: '2×' },
+];
+const VELOCIDADE_PADRAO = 0.5;
+const VELOCIDADE_OPERACAO = 0.25; // operação de emergência: 6 drones ao mesmo tempo
+
+// Mensagens que mudam só nos números ("Drone a 225 m" → "a 213 m") contam como a mesma
+const semNumeros = (texto) => (texto || '').replace(/[\d.,]+/g, '#');
 const DECISOES_POR_TIQUE = 4; // 4 decisões por atualização da tela: reage mais rápido
 
 // Enquadramento de uma rota: o meio de todas as paradas, com folga em volta
@@ -137,6 +151,16 @@ function focoDaRota(configuracao) {
   const centro = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
   const lado = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
   return { centro, km: Math.max(lado * 1.6, 8) };
+}
+
+// Enquadramento de uma operação: todas as filiais e abrigos dela, com folga em volta
+function focoDaOperacao(operacao) {
+  const pontos = [...operacao.drones.map((drone) => drone.origem), ...operacao.abrigos];
+  const xs = pontos.map((p) => p.x);
+  const ys = pontos.map((p) => p.y);
+  const centro = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  const lado = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  return { centro, km: lado * 1.25 };
 }
 
 // O destino escolhido é válido? Devolve o problema em texto, ou null se estiver tudo certo.
@@ -228,7 +252,6 @@ export default function Simular() {
   const [etapasDoVoo, setEtapasDoVoo] = useState([]);
   useEffect(() => {
     if (voo === null || !voo.mensagem) return;
-    const semNumeros = (texto) => texto.replace(/[\d.,]+/g, '#');
     setEtapasDoVoo((atuais) => {
       const ultima = atuais[atuais.length - 1];
       if (ultima && semNumeros(ultima.mensagem) === semNumeros(voo.mensagem)) return atuais;
@@ -239,12 +262,23 @@ export default function Simular() {
   // Outros drones da rede voando ao mesmo tempo (cada um é um voo de verdade)
   const [outros, setOutros] = useState([]);
 
+  // Velocidade da simulação (o relógio lê pela referência, para mudar no meio do voo)
+  const [velocidade, setVelocidade] = useState(VELOCIDADE_PADRAO);
+  const velocidadeRef = useRef(velocidade);
+  velocidadeRef.current = velocidade;
+
+  // Rádio: as mensagens de todos os drones, para o painel por cima do mapa
+  const [radio, setRadio] = useState([]);
+  const ultimaDoDrone = useRef({}); // a última mensagem (sem números) de cada drone
+
   // Pedidos feitos na aba Pedidos: um deles pode chegar aqui para virar o voo
   const { pedidoParaVoar, setPedidoParaVoar, atualizarStatus } = usePedidos();
 
   // Começa um voo novo (e esvazia os momentos do voo anterior)
   const iniciar = () => {
     setEtapasDoVoo([]);
+    setRadio([]);
+    ultimaDoDrone.current = {};
     setOutros(extrasPlanejados.map(criarVooDaRede));
     setVoo(criarVoo(configuracao));
     if (configuracao.pedido) atualizarStatus(configuracao.pedido.codigo, 'Em voo');
@@ -317,6 +351,7 @@ export default function Simular() {
     setVoo(null);
     setOutros([]);
     setFoco(focoDaRota(nova));
+    setVelocidade(nova.operacao ? VELOCIDADE_OPERACAO : VELOCIDADE_PADRAO);
     setPedidoParaVoar(null);
   }, [pedidoParaVoar]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -421,14 +456,26 @@ export default function Simular() {
     const relogio = setInterval(() => {
       let principal = vooRef.current;
       let rede = outrosRef.current;
+      const passo = (PASSO_KM * velocidadeRef.current) / DECISOES_POR_TIQUE;
       for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
-        const passo = PASSO_KM / DECISOES_POR_TIQUE;
         [principal, ...rede] = aproximarDrones([avancarVoo(principal, passo, eventos, regiao), ...avancarRede(rede, passo, regiao)]);
       }
       vooRef.current = principal;
       outrosRef.current = rede;
       setVoo(principal);
       setOutros(rede);
+
+      // Mensagens novas de cada drone vão para o rádio (com a cor dele no mapa)
+      const novas = [];
+      [principal, ...rede].forEach((drone, indice) => {
+        const nome = drone.idDrone || 'SADEC-01';
+        const chave = semNumeros(drone.mensagem);
+        if (!drone.mensagem || ultimaDoDrone.current[nome] === chave || (drone.espera > 0)) return;
+        ultimaDoDrone.current[nome] = chave;
+        const cor = indice === 0 ? '#0B1F33' : (extrasPlanejados[indice - 1] && extrasPlanejados[indice - 1].cor) || TEMA.marca;
+        novas.push({ id: `${nome}-${Date.now()}-${indice}`, nome, cor, texto: drone.mensagem });
+      });
+      if (novas.length > 0) setRadio((atual) => [...atual, ...novas].slice(-30));
     }, PASSO_MS);
 
     // Quando todos pousam (ou a tela fecha), desliga o relógio
@@ -441,8 +488,12 @@ export default function Simular() {
 
   // Tamanho da vista que o mapa deve ter agora (em unidades do desenho)
   const obstaculoPerto = voo !== null && algumObstaculoPerto(voo.obstaculos, voo.tempo, posicao, RAIO_ZOOM_KM);
+  // Numa operação com vários drones, a câmera fica parada sobre a região inteira (sem seguir
+  // um drone nem dar zoom), para todos aparecerem ao mesmo tempo
+  const vistaOperacao = configuracao.operacao ? focoDaOperacao(configuracao.operacao) : null;
   let vistaAlvo;
-  if (voo !== null) vistaAlvo = obstaculoPerto && emVoo ? VISTA_APROXIMADA : VISTA_VOO;
+  if (voo !== null && vistaOperacao) vistaAlvo = vistaOperacao.km * UNIDADES_POR_KM;
+  else if (voo !== null) vistaAlvo = obstaculoPerto && emVoo ? VISTA_APROXIMADA : VISTA_VOO;
   else vistaAlvo = foco ? foco.km * UNIDADES_POR_KM : VISTA_CIDADE;
 
   // Zoom suave: a cada atualização, a vista anda 30% do caminho até o alvo
@@ -496,7 +547,7 @@ export default function Simular() {
           pontosEntrega={configuracao.operacao ? configuracao.operacao.abrigos : []}
           destino={configuracao.destino}
           origem={voo ? voo.hub || voo.origem : origem}
-          centro={voo === null && foco ? foco.centro : undefined}
+          centro={voo !== null && vistaOperacao ? vistaOperacao.centro : voo === null && foco ? foco.centro : undefined}
           mostrarAlcance={mostrarAlcance}
           drone={posicao}
           desvio={desvio}
@@ -527,6 +578,17 @@ export default function Simular() {
           aoTocar={voo === null ? tocarNoMapa : undefined}
         />
       </View>
+
+      {/* Durante o voo: o rádio logo abaixo do mapa (numa operação, mostra mais mensagens) */}
+      {voo !== null ? <LogDoRadio mensagens={radio} quantas={configuracao.operacao ? 3 : 2} /> : null}
+
+      {/* Velocidade da simulação: dá para mudar no meio do voo */}
+      {voo !== null ? (
+        <View style={styles.linhaVelocidade}>
+          <Text style={styles.rotuloVelocidade}>Velocidade</Text>
+          <Opcoes opcoes={VELOCIDADES} valor={velocidade} aoEscolher={setVelocidade} />
+        </View>
+      ) : null}
 
       {/* Legenda do mapa: aparece e some com um toque (na montagem e durante o voo) */}
       <View style={styles.linhaMapa}>
@@ -730,6 +792,18 @@ const styles = StyleSheet.create({
   },
   areaMapa: {
     marginTop: 20,
+  },
+  linhaVelocidade: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  rotuloVelocidade: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEMA.textoSuave,
   },
   linhaMapa: {
     marginTop: 8,
