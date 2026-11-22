@@ -27,6 +27,18 @@ const ERRO_GPS_DELE_KM = 0.05; // se ele está sem GPS, a posição que ele tran
 
 // Cria o obstáculo à frente do drone, na rota, de um jeito que ele CRUZE o caminho
 // justamente quando o drone chegar lá (é o pior caso, o que testa o desvio).
+// Nome de rádio do outro drone (ex.: "SADEC-37"). O evento montado na tela tem um id
+// interno ("orgao-transito-0", 3...), que não serve para aparecer nas mensagens: ele vira
+// um número de 02 a 99, sempre o mesmo para o mesmo evento. Nunca é 01, que é o nosso
+// drone (o desempate por identificação compara esses nomes).
+function nomeDoDrone(idDoEvento) {
+  if (idDoEvento === undefined) return 'SADEC-07';
+  let soma = 0;
+  for (const letra of String(idDoEvento)) soma += letra.charCodeAt(0);
+  const numero = 2 + (soma % 98); // de 2 a 99
+  return `SADEC-${String(numero).padStart(2, '0')}`;
+}
+
 // "local": onde o drone está | "direcao": para onde ele vai (vetor de tamanho 1)
 export function criarObstaculo(evento, local, direcao, tempoAgora) {
   const pontoNaRota = { x: local.x + direcao.x * ANTECEDENCIA_KM, y: local.y + direcao.y * ANTECEDENCIA_KM };
@@ -40,7 +52,7 @@ export function criarObstaculo(evento, local, direcao, tempoAgora) {
     const semGps = evento.semGps === true;
     return {
       tipo: 'drone',
-      id: evento.id ?? 'SADEC-07',
+      id: nomeDoDrone(evento.id),
       prioridade: evento.prioridade ?? 'comercial',
       bateria: evento.bateria ?? 60,
       comunicacao,
