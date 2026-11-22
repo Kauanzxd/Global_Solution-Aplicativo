@@ -9,6 +9,7 @@ import Contador from '../../componentes/Contador';
 import EditorEventos from '../../componentes/EditorEventos';
 import LegendaMapa from '../../componentes/LegendaMapa';
 import LogDoRadio from '../../componentes/LogDoRadio';
+import useVozDoRadio from '../../componentes/useVozDoRadio';
 import Mapa from '../../componentes/Mapa';
 import Opcoes from '../../componentes/Opcoes';
 import ResumoVoo from '../../componentes/ResumoVoo';
@@ -282,6 +283,9 @@ export default function Simular() {
   // Até que horas (Date.now) a câmera lenta vale; o estado só serve para mostrar o aviso
   const cameraLentaAte = useRef(0);
 
+  // Voz do rádio: lê as mensagens em voz alta (pode ser desligada)
+  const voz = useVozDoRadio();
+
   // Rolagem da tela: ao iniciar a simulação, a tela sobe até o mapa
   const rolagem = useRef(null);
   const topoDoMapa = useRef(0); // onde o mapa começa dentro da tela (medido pelo onLayout)
@@ -297,6 +301,10 @@ export default function Simular() {
     ultimaDoDrone.current = {};
     cameraLentaAte.current = 0;
     setCameraLenta(false);
+    // A primeira fala sai aqui, no toque do botão: no iPhone e no navegador, a voz só é
+    // liberada se começar por um toque do usuário
+    voz.parar();
+    voz.falar([{ nome: 'Central SADEC', texto: 'Simulação iniciada', evento: false }]);
     // Sobe a tela até o mapa (com um respiro abaixo da barra de status do celular)
     if (rolagem.current) rolagem.current.scrollTo({ y: Math.max(topoDoMapa.current - margens.top - 8, 0), animated: true });
     setOutros(extrasPlanejados.map(criarVooDaRede));
@@ -306,6 +314,7 @@ export default function Simular() {
 
   // Volta para a montagem (interrompe o voo e tira os outros drones do mapa)
   const reiniciar = () => {
+    voz.parar();
     setVoo(null);
     setOutros([]);
   };
@@ -368,6 +377,7 @@ export default function Simular() {
     };
     setConfiguracao(nova);
     setCenario(null);
+    voz.parar();
     setVoo(null);
     setOutros([]);
     setFoco(focoDaRota(nova));
@@ -476,8 +486,9 @@ export default function Simular() {
     const relogio = setInterval(() => {
       let principal = vooRef.current;
       let rede = outrosRef.current;
-      // Na câmera lenta, a velocidade cai para 0,1× (se a escolhida já for menor, fica a escolhida)
-      const lenta = Date.now() < cameraLentaAte.current;
+      // Na câmera lenta, a velocidade cai para 0,1× (se a escolhida já for menor, fica a escolhida).
+      // Com a voz ligada, a câmera lenta dura até a voz terminar de contar o evento.
+      const lenta = Date.now() < cameraLentaAte.current || voz.narrandoEvento();
       const velocidadeAgora = lenta ? Math.min(velocidadeRef.current, VELOCIDADE_CAMERA_LENTA) : velocidadeRef.current;
       setCameraLenta(lenta);
       const passo = (PASSO_KM * velocidadeAgora) / DECISOES_POR_TIQUE;
@@ -497,11 +508,12 @@ export default function Simular() {
         if (!drone.mensagem || ultimaDoDrone.current[nome] === chave || (drone.espera > 0)) return;
         ultimaDoDrone.current[nome] = chave;
         const cor = indice === 0 ? '#0B1F33' : (extrasPlanejados[indice - 1] && extrasPlanejados[indice - 1].cor) || TEMA.marca;
-        novas.push({ id: `${nome}-${Date.now()}-${indice}`, nome, cor, texto: drone.mensagem });
+        novas.push({ id: `${nome}-${Date.now()}-${indice}`, nome, cor, texto: drone.mensagem, evento: ehEvento(drone.mensagem) });
       });
       if (novas.length > 0) setRadio((atual) => [...atual, ...novas].slice(-30));
+      voz.falar(novas);
       // Algum drone começou a reagir a um evento? Liga (ou estende) a câmera lenta
-      if (novas.some((mensagem) => ehEvento(mensagem.texto))) cameraLentaAte.current = Date.now() + DURACAO_CAMERA_LENTA_MS;
+      if (novas.some((mensagem) => mensagem.evento)) cameraLentaAte.current = Date.now() + DURACAO_CAMERA_LENTA_MS;
     }, PASSO_MS);
 
     // Quando todos pousam (ou a tela fecha), desliga o relógio
@@ -627,6 +639,16 @@ export default function Simular() {
         <Pressable style={[styles.chip, mostrarLegenda && styles.chipLigado]} onPress={() => setMostrarLegenda(!mostrarLegenda)}>
           <Text style={[styles.textoChip, mostrarLegenda && styles.textoChipLigado]}>
             {mostrarLegenda ? 'Esconder legenda' : 'Legenda do mapa'}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.chip, voz.ligada && styles.chipLigado]}
+          onPress={() => voz.setLigada(!voz.ligada)}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: voz.ligada }}
+        >
+          <Text style={[styles.textoChip, voz.ligada && styles.textoChipLigado]}>
+            {voz.ligada ? 'Voz do rádio: ligada' : 'Voz do rádio: desligada'}
           </Text>
         </Pressable>
       </View>
