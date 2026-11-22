@@ -1,8 +1,9 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import Svg, { Circle, G, Line, Path, Polygon, Polyline, Rect, Text } from 'react-native-svg';
 import { AREAS, CONTORNO, FILIAIS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
 import { RAIO_FILIAL_KM } from '../regras/cobertura';
+import CamadaRuas from './CamadaRuas';
 
 // O desenho usa um "papel" de 100 x 100 unidades (o viewBox).
 // Como o mapa tem 76 km, cada unidade vale 760 metros: multiplicamos km por 100 ÷ 76.
@@ -415,7 +416,10 @@ function MarcadorEvento({ marcador, s }) {
 // "outrosDrones" (opcional): drones da rede voando ao mesmo tempo
 //   [{ id, x, y, altitude, cor, rota: { origem, destino }, comParaquedas }]
 // "pontosEntrega" (opcional): outros pontos de entrega para marcar (os abrigos de uma operação)
+// "mapaDeRuas" (opcional, ligado por padrão): mostra o mapa de ruas de verdade por baixo;
+//   desligado, volta o desenho simples (áreas, rios e vias principais)
 export default function Mapa({
+  mapaDeRuas = true,
   marcadores = [],
   pontosEntrega = [],
   outrosDrones = [],
@@ -436,6 +440,8 @@ export default function Mapa({
 }) {
   // Referência para a caixa do mapa: serve para medir onde ela está na tela na hora do toque
   const caixa = useRef(null);
+  // Largura do mapa na tela (px): define o zoom dos tiles do mapa de ruas
+  const [larguraTela, setLarguraTela] = useState(380);
   const partida = origem || FILIAIS[0];
   const posicaoDrone = drone || partida;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -468,8 +474,10 @@ export default function Mapa({
   };
   const visiveis = LOCAIS.filter(naVista).sort((a, b) => importancia(a) - importancia(b));
   // Os nomes são escolhidos na ordem contrária (o mais importante primeiro). Sem detalhe,
-  // só os locais da rota têm nome.
-  const candidatosRotulo = [...visiveis].reverse().filter((local) => detalhe || importancia(local) === 2);
+  // só os locais da rota têm nome. Com o mapa de ruas (que já tem muitos nomes), os
+  // hospitais fora da rota ficam só com a letra "H", para não esconder as ruas.
+  const comNome = (local) => importancia(local) === 2 || (detalhe && (!mapaDeRuas || importancia(local) === 1));
+  const candidatosRotulo = [...visiveis].reverse().filter(comNome);
   const rotulados = escolherRotulos(candidatosRotulo, s);
 
   // Cidades vizinhas: um retângulo do tamanho do mapa com um "furo" no formato da cidade.
@@ -504,8 +512,19 @@ export default function Mapa({
   const coletaLivre = coleta && !LOCAIS.some((local) => local.id === coleta.id);
 
   return (
-    <Pressable ref={caixa} style={styles.caixa} onPress={tocar} disabled={!aoTocar}>
+    <Pressable
+      ref={caixa}
+      style={styles.caixa}
+      onPress={tocar}
+      disabled={!aoTocar}
+      onLayout={(evento) => setLarguraTela(evento.nativeEvent.layout.width || 380)}
+    >
       <Svg width="100%" height="100%" viewBox={`${x0} ${y0} ${vista} ${vista}`}>
+        {/* 0. Mapa de ruas de verdade (no lugar das camadas 1 a 4, 6, 7 e 8) */}
+        {mapaDeRuas ? (
+          <CamadaRuas x0={x0} y0={y0} vista={vista} escala={ESCALA} larguraTela={larguraTela} />
+        ) : (
+        <G>
         {/* 1. Fundo: a cidade (área urbana) */}
         <Rect x="0" y="0" width="100" height="100" fill={CORES.urbano} />
 
@@ -531,11 +550,16 @@ export default function Mapa({
             strokeWidth={rio.largura ? Math.max(rio.largura * ESCALA, 0.8 * s) : 0.8 * s}
           />
         ))}
+        </G>
+        )}
 
         {/* 5. Cidades vizinhas por cima de tudo isso (esmaecidas) e a linha do contorno */}
-        <Path d={vizinhasSvg} fill={CORES.vizinhas} fillRule="evenodd" opacity="0.95" />
+        {/* (com o mapa de ruas, as vizinhas ficam só sombreadas, para as ruas continuarem visíveis) */}
+        <Path d={vizinhasSvg} fill={CORES.vizinhas} fillRule="evenodd" opacity={mapaDeRuas ? 0.45 : 0.95} />
         <Path d={`${contornoSvg} Z`} fill="none" stroke={CORES.contorno} strokeWidth={0.5 * s} strokeDasharray={tracejado([1.5, 1], s)} />
 
+        {!mapaDeRuas && (
+        <G>
         {/* 6. Pico do Jaraguá: um triângulo, o símbolo de montanha */}
         <Polygon
           points={paraPontosSvg([
@@ -569,6 +593,8 @@ export default function Mapa({
             strokeDasharray={ESTILO_VIA[via.tipo].tracejado && tracejado(ESTILO_VIA[via.tipo].tracejado, s)}
           />
         ))}
+        </G>
+        )}
 
         {/* Alcance das filiais: um círculo de 10 km em volta de cada uma. Onde dois ou mais
             círculos se sobrepõem, a cor fica mais forte: é a cobertura dupla aparecendo */}
@@ -587,8 +613,8 @@ export default function Mapa({
             />
           ))}
 
-        {/* 8. Nomes das áreas (só as que têm "rotulo") */}
-        {AREAS.filter((area) => area.rotulo).map((area) => (
+        {/* 8. Nomes das áreas (só as que têm "rotulo"; o mapa de ruas já tem os nomes) */}
+        {!mapaDeRuas && AREAS.filter((area) => area.rotulo).map((area) => (
           <Rotulo
             key={`rotulo-${area.nome}`}
             x={area.rotulo.x * ESCALA}
@@ -727,6 +753,15 @@ export default function Mapa({
       {/* 12. Painel por cima do mapa, sem zoom: vento e selo de zoom */}
       <Svg style={StyleSheet.absoluteFill} viewBox="0 0 100 100" pointerEvents="none">
         {vento && <IndicadorVento vento={vento} />}
+        {/* Créditos do mapa de ruas (exigidos pelo OpenStreetMap) */}
+        {mapaDeRuas && (
+          <G>
+            <Rect x="61" y="96.2" width="38.5" height="3.6" rx="0.8" fill="#FFFFFF" opacity="0.85" />
+            <Text x="98.8" y="98.8" fontSize="2.2" fill="#444444" textAnchor="end">
+              © colaboradores do OpenStreetMap
+            </Text>
+          </G>
+        )}
         {/* O selo só aparece no zoom forte (obstáculo perto), não na vista normal do voo */}
         {vista / ESCALA < 3 && <SeloZoom km={vista / ESCALA} />}
       </Svg>

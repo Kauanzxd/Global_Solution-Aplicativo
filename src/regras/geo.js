@@ -24,6 +24,15 @@ export function grausParaKm(lat, lon) {
   };
 }
 
+// O caminho contrário: km do mapa → graus (serve para saber quais "tiles" do mapa de ruas
+// cobrem a parte do mapa que está na tela)
+export function kmParaGraus(x, y) {
+  return {
+    lat: ORIGEM.lat - y / KM_POR_GRAU_LATITUDE,
+    lon: ORIGEM.lon + x / KM_POR_GRAU_LONGITUDE,
+  };
+}
+
 // Converte uma lista de pontos [latitude, longitude] na lista [x, y] em km que o mapa
 // e as regras de risco usam (o mesmo formato de antes, em dados/regiao.js).
 export function listaParaKm(pontos) {
