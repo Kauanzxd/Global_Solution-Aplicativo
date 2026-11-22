@@ -140,6 +140,14 @@ const VELOCIDADE_OPERACAO = 0.25; // operação de emergência: 6 drones ao mesm
 
 // Mensagens que mudam só nos números ("Drone a 225 m" → "a 213 m") contam como a mesma
 const semNumeros = (texto) => (texto || '').replace(/[\d.,]+/g, '#');
+
+// Câmera lenta: quando um drone reage a um evento (pane, GPS, outro drone, vento...), a
+// simulação fica bem mais lenta por alguns segundos, para dar tempo de ver a reação.
+const VELOCIDADE_CAMERA_LENTA = 0.1;
+const DURACAO_CAMERA_LENTA_MS = 3500;
+// Mensagens de rotina (decolar, voar, entregar, voltar) não são eventos: não ligam a câmera lenta
+const ROTINA = /^(Decolando|Voando|Voltando para|Aguardando|Sobre |Pousou no ponto|Entrega feita!|Missão concluída|Desviando pela direita|Desvio concluído)|coletad[oa]! Decolando/;
+const ehEvento = (texto) => !ROTINA.test(texto);
 const DECISOES_POR_TIQUE = 4; // 4 decisões por atualização da tela: reage mais rápido
 
 // Enquadramento de uma rota: o meio de todas as paradas, com folga em volta
@@ -271,6 +279,10 @@ export default function Simular() {
   const [radio, setRadio] = useState([]);
   const ultimaDoDrone = useRef({}); // a última mensagem (sem números) de cada drone
 
+  // Até que horas (Date.now) a câmera lenta vale; o estado só serve para mostrar o aviso
+  const cameraLentaAte = useRef(0);
+  const [cameraLenta, setCameraLenta] = useState(false);
+
   // Pedidos feitos na aba Pedidos: um deles pode chegar aqui para virar o voo
   const { pedidoParaVoar, setPedidoParaVoar, atualizarStatus } = usePedidos();
 
@@ -279,6 +291,8 @@ export default function Simular() {
     setEtapasDoVoo([]);
     setRadio([]);
     ultimaDoDrone.current = {};
+    cameraLentaAte.current = 0;
+    setCameraLenta(false);
     setOutros(extrasPlanejados.map(criarVooDaRede));
     setVoo(criarVoo(configuracao));
     if (configuracao.pedido) atualizarStatus(configuracao.pedido.codigo, 'Em voo');
@@ -456,7 +470,11 @@ export default function Simular() {
     const relogio = setInterval(() => {
       let principal = vooRef.current;
       let rede = outrosRef.current;
-      const passo = (PASSO_KM * velocidadeRef.current) / DECISOES_POR_TIQUE;
+      // Na câmera lenta, a velocidade cai para 0,1× (se a escolhida já for menor, fica a escolhida)
+      const lenta = Date.now() < cameraLentaAte.current;
+      const velocidadeAgora = lenta ? Math.min(velocidadeRef.current, VELOCIDADE_CAMERA_LENTA) : velocidadeRef.current;
+      setCameraLenta(lenta);
+      const passo = (PASSO_KM * velocidadeAgora) / DECISOES_POR_TIQUE;
       for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
         [principal, ...rede] = aproximarDrones([avancarVoo(principal, passo, eventos, regiao), ...avancarRede(rede, passo, regiao)]);
       }
@@ -476,6 +494,8 @@ export default function Simular() {
         novas.push({ id: `${nome}-${Date.now()}-${indice}`, nome, cor, texto: drone.mensagem });
       });
       if (novas.length > 0) setRadio((atual) => [...atual, ...novas].slice(-30));
+      // Algum drone começou a reagir a um evento? Liga (ou estende) a câmera lenta
+      if (novas.some((mensagem) => ehEvento(mensagem.texto))) cameraLentaAte.current = Date.now() + DURACAO_CAMERA_LENTA_MS;
     }, PASSO_MS);
 
     // Quando todos pousam (ou a tela fecha), desliga o relógio
@@ -577,10 +597,16 @@ export default function Simular() {
           }))}
           aoTocar={voo === null ? tocarNoMapa : undefined}
         />
+        {/* Aviso de câmera lenta, no alto do mapa */}
+        {voo !== null && cameraLenta ? (
+          <Text style={styles.avisoCameraLenta} accessibilityLiveRegion="polite">
+            Câmera lenta: reação ao evento
+          </Text>
+        ) : null}
       </View>
 
-      {/* Durante o voo: o rádio logo abaixo do mapa, com as 3 últimas mensagens (em qualquer simulação) */}
-      {voo !== null ? <LogDoRadio mensagens={radio} quantas={3} /> : null}
+      {/* Durante o voo: o rádio logo abaixo do mapa, com as 5 últimas mensagens (em qualquer simulação) */}
+      {voo !== null ? <LogDoRadio mensagens={radio} quantas={5} /> : null}
 
       {/* Velocidade da simulação: dá para mudar no meio do voo */}
       {voo !== null ? (
@@ -799,6 +825,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+  },
+  avisoCameraLenta: {
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    overflow: 'hidden',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    backgroundColor: 'rgba(11, 31, 51, 0.85)',
   },
   rotuloVelocidade: {
     fontSize: 13,
