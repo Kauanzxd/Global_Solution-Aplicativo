@@ -553,6 +553,36 @@ function escolherZona(voo, local, regiao) {
   return zonaMaisProxima(local, regiao.zonas).zona;
 }
 
+// ---------- Relato das decisões (para o rádio e a voz) ----------
+// Numa emergência, o drone conta o que checou e por que escolheu: o evento, as zonas de
+// pouso mais próximas (com os números) e a decisão. Fica em "voo.relato", junto com a
+// mensagem que ele explica ("para"); a tela lê o relato linha por linha no rádio.
+const ZONAS_NO_RELATO = 3;
+
+// As zonas mais próximas, garantindo que a escolhida esteja na lista
+function zonasParaRelatar(local, zonas, escolhida) {
+  const proximas = [...zonas].sort((a, b) => distanciaKm(local, a) - distanciaKm(local, b)).slice(0, ZONAS_NO_RELATO);
+  if (escolhida && !proximas.includes(escolhida)) proximas[proximas.length - 1] = escolhida;
+  return proximas;
+}
+
+// Com os motores bons: cada zona, a distância e se a bateria alcança (com a margem de 30%)
+function relatoDaZona(voo, local, regiao, motivo, escolhida, mensagem) {
+  const fator = voo.temperaturaAlta ? FATOR_KM_TEMPERATURA_ALTA : 1;
+  const tem = Math.round(voo.bateria ?? 100);
+  const linhas = zonasParaRelatar(local, regiao.zonas, escolhida).map((zona) => {
+    const distancia = distanciaKm(local, zona);
+    const precisa = Math.round(bateriaParaChegar(distancia) * fator);
+    const resposta = tem >= precisa ? 'alcança' : 'não alcança';
+    return `${zona.id}, ${distancia.toFixed(1)} km: ${resposta} (precisa de ${precisa}%, temos ${tem}%)`;
+  });
+  const porque = escolhida.ehHub ? 'filial é área controlada da SADEC, a preferida' : 'a zona controlada mais próxima';
+  return {
+    para: mensagem,
+    linhas: [`${motivo} Checando as zonas de pouso mais próximas.`, ...linhas, `Decisão: desviar para ${comArtigo(escolhida, 'a')} (${porque})`],
+  };
+}
+
 // Desvia para uma zona controlada (o hub, se der), com os motores bons, a 120 m.
 // "imediato": true = vai para a zona MAIS PRÓXIMA, sem preferir o hub (ex.: risco de incêndio)
 function desviarParaZona(voo, local, regiao, motivo, imediato = false) {
@@ -562,6 +592,7 @@ function desviarParaZona(voo, local, regiao, motivo, imediato = false) {
   // continua sendo a melhor opção quando é também a zona controlada mais perto.
   const maisProxima = zonaMaisProxima(local, regiao.zonas).zona === zona;
   const explicacao = maisProxima ? ', a zona controlada mais próxima' : '';
+  const mensagem = `${motivo} Desviando para ${comArtigo(zona, 'a')}${explicacao}`;
   return {
     ...continuar(voo),
     origem: local,
@@ -569,7 +600,8 @@ function desviarParaZona(voo, local, regiao, motivo, imediato = false) {
     km: 0,
     situacao: 'desviando',
     emergencia: true,
-    mensagem: `${motivo} Desviando para ${comArtigo(zona, 'a')}${explicacao}`,
+    mensagem,
+    relato: relatoDaZona(voo, local, regiao, motivo, zona, mensagem),
   };
 }
 
@@ -623,12 +655,25 @@ function falhaMotor(voo, local, altitude, regiao, motivo) {
     .filter((a) => respostaChegada(a.prevista) === 'sim')
     .sort((a, b) => distanciaKm(local, a.zona) - distanciaKm(local, b.zona)); // a mais perto
 
-  if (seguras.length === 0) {
-    return abrirParaquedas(voo, local, altitude, regiao, `${motivo} Nenhuma zona alcançável com segurança.`);
-  }
   // Entre as zonas em que ele chega com folga, o hub é o preferido; senão, a mais perto
-  const hubSeguro = seguras.find((a) => a.zona.ehHub);
-  return seguirComMotorFraco(voo, local, altitude, (hubSeguro || seguras[0]).zona, regiao, motivo);
+  const escolhida = seguras.length > 0 ? (seguras.find((a) => a.zona.ehHub) || seguras[0]).zona : null;
+  const resultado = escolhida
+    ? seguirComMotorFraco(voo, local, altitude, escolhida, regiao, motivo)
+    : abrirParaquedas(voo, local, altitude, regiao, `${motivo} Nenhuma zona alcançável com segurança.`);
+
+  // Relato: a altitude prevista na chegada a cada zona próxima (precisa chegar com folga)
+  const RESPOSTAS = { sim: 'chega com folga', talvez: 'chega com pouca margem', nao: 'não chega' };
+  const linhas = zonasParaRelatar(local, regiao.zonas, escolhida).map((zona) => {
+    const prevista = chegadaPrevista(local, altitude, zona, vento);
+    return `${zona.id}: ${RESPOSTAS[respostaChegada(prevista)]} (chegada prevista a ${Math.max(Math.round(prevista), 0)} m)`;
+  });
+  const decisao = escolhida
+    ? `Decisão: seguir com motor fraco para ${comArtigo(escolhida, 'a')}${escolhida.ehHub ? ' (filial, a preferida)' : ''}`
+    : 'Decisão: nenhuma zona é segura, abrir o paraquedas';
+  return {
+    ...resultado,
+    relato: { para: resultado.mensagem, linhas: [`${motivo} Checando as zonas a ${Math.round(altitude)} m de altura, com motor fraco.`, ...linhas, decisao] },
+  };
 }
 
 // ---------- GPS ----------

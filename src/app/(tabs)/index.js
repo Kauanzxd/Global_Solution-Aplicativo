@@ -508,7 +508,14 @@ export default function Simular() {
         if (!drone.mensagem || ultimaDoDrone.current[nome] === chave || (drone.espera > 0)) return;
         ultimaDoDrone.current[nome] = chave;
         const cor = indice === 0 ? '#0B1F33' : (extrasPlanejados[indice - 1] && extrasPlanejados[indice - 1].cor) || TEMA.marca;
-        novas.push({ id: `${nome}-${Date.now()}-${indice}`, nome, cor, texto: drone.mensagem, evento: ehEvento(drone.mensagem) });
+        // Numa emergência com relato (zonas checadas e decisão), o rádio conta linha por linha
+        const relato = drone.relato && drone.relato.para === drone.mensagem ? drone.relato.linhas : null;
+        (relato || [drone.mensagem]).forEach((texto, linha, todas) => {
+          // Num relato, as linhas formam uma transmissão só (para a voz: início, meio e fim)
+          let parte;
+          if (relato) parte = linha === 0 ? 'inicio' : linha === todas.length - 1 ? 'fim' : 'meio';
+          novas.push({ id: `${nome}-${Date.now()}-${indice}-${linha}`, nome, cor, texto, evento: Boolean(relato) || ehEvento(texto), parte });
+        });
       });
       if (novas.length > 0) setRadio((atual) => [...atual, ...novas].slice(-30));
       voz.falar(novas);
