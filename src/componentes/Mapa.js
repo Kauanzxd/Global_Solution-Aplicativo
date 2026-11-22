@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, Text as Texto, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Polygon, Polyline, Rect, Text } from 'react-native-svg';
 import { AREAS, CONTORNO, FILIAIS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
 import { RAIO_FILIAL_KM } from '../regras/cobertura';
 import CamadaRuas from './CamadaRuas';
+import usePinca from './usePinca';
 
 // O desenho usa um "papel" de 100 x 100 unidades (o viewBox).
 // Como o mapa tem 76 km, cada unidade vale 760 metros: multiplicamos km por 100 ÷ 76.
@@ -435,11 +436,15 @@ export default function Mapa({
   vento,
   incerteza = 0,
   obstaculos = [],
-  vista = 100,
+  vista: vistaAutomatica = 100,
   aoTocar,
 }) {
   // Referência para a caixa do mapa: serve para medir onde ela está na tela na hora do toque
   const caixa = useRef(null);
+  // Zoom do usuário (pinça ou roda do mouse) por cima do zoom automático da simulação.
+  // A vista nunca passa do mapa inteiro (100) nem fica menor que 1,5 km (2 unidades).
+  const [fatorZoom, setFatorZoom] = usePinca(caixa);
+  const vista = Math.min(100, Math.max(2, vistaAutomatica * fatorZoom));
   // Largura do mapa na tela (px): define o zoom dos tiles do mapa de ruas
   const [larguraTela, setLarguraTela] = useState(380);
   const partida = origem || FILIAIS[0];
@@ -512,260 +517,268 @@ export default function Mapa({
   const coletaLivre = coleta && !LOCAIS.some((local) => local.id === coleta.id);
 
   return (
-    <Pressable
-      ref={caixa}
-      style={styles.caixa}
-      onPress={tocar}
-      disabled={!aoTocar}
-      onLayout={(evento) => setLarguraTela(evento.nativeEvent.layout.width || 380)}
-    >
-      <Svg width="100%" height="100%" viewBox={`${x0} ${y0} ${vista} ${vista}`}>
-        {/* 0. Mapa de ruas de verdade (no lugar das camadas 1 a 4, 6, 7 e 8) */}
-        {mapaDeRuas ? (
-          <CamadaRuas x0={x0} y0={y0} vista={vista} escala={ESCALA} larguraTela={larguraTela} />
-        ) : (
-        <G>
-        {/* 1. Fundo: a cidade (área urbana) */}
-        <Rect x="0" y="0" width="100" height="100" fill={CORES.urbano} />
+    <View>
+      <Pressable
+        ref={caixa}
+        style={styles.caixa}
+        onPress={tocar}
+        disabled={!aoTocar}
+        onLayout={(evento) => setLarguraTela(evento.nativeEvent.layout.width || 380)}
+      >
+        <Svg width="100%" height="100%" viewBox={`${x0} ${y0} ${vista} ${vista}`}>
+          {/* 0. Mapa de ruas de verdade (no lugar das camadas 1 a 4, 6, 7 e 8) */}
+          {mapaDeRuas ? (
+            <CamadaRuas x0={x0} y0={y0} vista={vista} escala={ESCALA} larguraTela={larguraTela} />
+          ) : (
+          <G>
+          {/* 1. Fundo: a cidade (área urbana) */}
+          <Rect x="0" y="0" width="100" height="100" fill={CORES.urbano} />
 
-        {/* 2. Parques e mata */}
-        {matas.map((area) => (
-          <Polygon key={area.nome} points={paraPontosSvg(area.pontos)} fill={CORES.mata} />
-        ))}
+          {/* 2. Parques e mata */}
+          {matas.map((area) => (
+            <Polygon key={area.nome} points={paraPontosSvg(area.pontos)} fill={CORES.mata} />
+          ))}
 
-        {/* 3. Represas */}
-        {represas.map((area) => (
-          <Polygon key={area.nome} points={paraPontosSvg(area.pontos)} fill={CORES.agua} />
-        ))}
+          {/* 3. Represas */}
+          {represas.map((area) => (
+            <Polygon key={area.nome} points={paraPontosSvg(area.pontos)} fill={CORES.agua} />
+          ))}
 
-        {/* 4. Rios (linhas azuis) */}
-        {RIOS.map((rio) => (
-          <Polyline
-            key={rio.nome}
-            points={paraPontosSvg(rio.pontos)}
-            fill="none"
-            stroke={CORES.agua}
-            strokeLinecap="round"
-            // Rio largo (Tietê): grossura de terreno, em km. Córrego: traço fino de tamanho fixo.
-            strokeWidth={rio.largura ? Math.max(rio.largura * ESCALA, 0.8 * s) : 0.8 * s}
+          {/* 4. Rios (linhas azuis) */}
+          {RIOS.map((rio) => (
+            <Polyline
+              key={rio.nome}
+              points={paraPontosSvg(rio.pontos)}
+              fill="none"
+              stroke={CORES.agua}
+              strokeLinecap="round"
+              // Rio largo (Tietê): grossura de terreno, em km. Córrego: traço fino de tamanho fixo.
+              strokeWidth={rio.largura ? Math.max(rio.largura * ESCALA, 0.8 * s) : 0.8 * s}
+            />
+          ))}
+          </G>
+          )}
+
+          {/* 5. Cidades vizinhas por cima de tudo isso (esmaecidas) e a linha do contorno */}
+          {/* (com o mapa de ruas, as vizinhas ficam só sombreadas, para as ruas continuarem visíveis) */}
+          <Path d={vizinhasSvg} fill={CORES.vizinhas} fillRule="evenodd" opacity={mapaDeRuas ? 0.45 : 0.95} />
+          <Path d={`${contornoSvg} Z`} fill="none" stroke={CORES.contorno} strokeWidth={0.5 * s} strokeDasharray={tracejado([1.5, 1], s)} />
+
+          {!mapaDeRuas && (
+          <G>
+          {/* 6. Pico do Jaraguá: um triângulo, o símbolo de montanha */}
+          <Polygon
+            points={paraPontosSvg([
+              [PICO.x, PICO.y - 0.35 * s],
+              [PICO.x - 0.35 * s, PICO.y + 0.25 * s],
+              [PICO.x + 0.35 * s, PICO.y + 0.25 * s],
+            ])}
+            fill={CORES.pico}
+            stroke="#FFFFFF"
+            strokeWidth={0.4 * s}
           />
-        ))}
-        </G>
-        )}
+          {detalhe && <Rotulo x={PICO.x * ESCALA} y={PICO.y * ESCALA - 1.4 * s} texto={PICO.nome} tamanho={2.0} s={s} />}
 
-        {/* 5. Cidades vizinhas por cima de tudo isso (esmaecidas) e a linha do contorno */}
-        {/* (com o mapa de ruas, as vizinhas ficam só sombreadas, para as ruas continuarem visíveis) */}
-        <Path d={vizinhasSvg} fill={CORES.vizinhas} fillRule="evenodd" opacity={mapaDeRuas ? 0.45 : 0.95} />
-        <Path d={`${contornoSvg} Z`} fill="none" stroke={CORES.contorno} strokeWidth={0.5 * s} strokeDasharray={tracejado([1.5, 1], s)} />
+          {/* 7. Vias: primeiro todas as bordas, depois todos os miolos */}
+          {VIAS.map((via) => (
+            <Polyline
+              key={`borda-${via.nome}`}
+              points={paraPontosSvg(via.pontos)}
+              fill="none"
+              stroke={ESTILO_VIA[via.tipo].borda}
+              strokeWidth={(ESTILO_VIA[via.tipo].largura + 0.6) * s}
+            />
+          ))}
+          {VIAS.map((via) => (
+            <Polyline
+              key={`miolo-${via.nome}`}
+              points={paraPontosSvg(via.pontos)}
+              fill="none"
+              stroke={ESTILO_VIA[via.tipo].miolo}
+              strokeWidth={ESTILO_VIA[via.tipo].largura * s}
+              strokeDasharray={ESTILO_VIA[via.tipo].tracejado && tracejado(ESTILO_VIA[via.tipo].tracejado, s)}
+            />
+          ))}
+          </G>
+          )}
 
-        {!mapaDeRuas && (
-        <G>
-        {/* 6. Pico do Jaraguá: um triângulo, o símbolo de montanha */}
-        <Polygon
-          points={paraPontosSvg([
-            [PICO.x, PICO.y - 0.35 * s],
-            [PICO.x - 0.35 * s, PICO.y + 0.25 * s],
-            [PICO.x + 0.35 * s, PICO.y + 0.25 * s],
-          ])}
-          fill={CORES.pico}
-          stroke="#FFFFFF"
-          strokeWidth={0.4 * s}
-        />
-        {detalhe && <Rotulo x={PICO.x * ESCALA} y={PICO.y * ESCALA - 1.4 * s} texto={PICO.nome} tamanho={2.0} s={s} />}
+          {/* Alcance das filiais: um círculo de 10 km em volta de cada uma. Onde dois ou mais
+              círculos se sobrepõem, a cor fica mais forte: é a cobertura dupla aparecendo */}
+          {mostrarAlcance &&
+            FILIAIS.map((filial) => (
+              <Circle
+                key={`alcance-${filial.id}`}
+                cx={filial.x * ESCALA}
+                cy={filial.y * ESCALA}
+                r={RAIO_FILIAL_KM * ESCALA}
+                fill={CORES.alcance}
+                fillOpacity="0.06"
+                stroke={CORES.alcance}
+                strokeOpacity="0.35"
+                strokeWidth={0.3 * s}
+              />
+            ))}
 
-        {/* 7. Vias: primeiro todas as bordas, depois todos os miolos */}
-        {VIAS.map((via) => (
-          <Polyline
-            key={`borda-${via.nome}`}
-            points={paraPontosSvg(via.pontos)}
-            fill="none"
-            stroke={ESTILO_VIA[via.tipo].borda}
-            strokeWidth={(ESTILO_VIA[via.tipo].largura + 0.6) * s}
-          />
-        ))}
-        {VIAS.map((via) => (
-          <Polyline
-            key={`miolo-${via.nome}`}
-            points={paraPontosSvg(via.pontos)}
-            fill="none"
-            stroke={ESTILO_VIA[via.tipo].miolo}
-            strokeWidth={ESTILO_VIA[via.tipo].largura * s}
-            strokeDasharray={ESTILO_VIA[via.tipo].tracejado && tracejado(ESTILO_VIA[via.tipo].tracejado, s)}
-          />
-        ))}
-        </G>
-        )}
-
-        {/* Alcance das filiais: um círculo de 10 km em volta de cada uma. Onde dois ou mais
-            círculos se sobrepõem, a cor fica mais forte: é a cobertura dupla aparecendo */}
-        {mostrarAlcance &&
-          FILIAIS.map((filial) => (
-            <Circle
-              key={`alcance-${filial.id}`}
-              cx={filial.x * ESCALA}
-              cy={filial.y * ESCALA}
-              r={RAIO_FILIAL_KM * ESCALA}
-              fill={CORES.alcance}
-              fillOpacity="0.06"
-              stroke={CORES.alcance}
-              strokeOpacity="0.35"
-              strokeWidth={0.3 * s}
+          {/* 8. Nomes das áreas (só as que têm "rotulo"; o mapa de ruas já tem os nomes) */}
+          {!mapaDeRuas && AREAS.filter((area) => area.rotulo).map((area) => (
+            <Rotulo
+              key={`rotulo-${area.nome}`}
+              x={area.rotulo.x * ESCALA}
+              y={area.rotulo.y * ESCALA}
+              texto={area.rotulo.texto}
+              tamanho={2.0}
+              s={s}
             />
           ))}
 
-        {/* 8. Nomes das áreas (só as que têm "rotulo"; o mapa de ruas já tem os nomes) */}
-        {!mapaDeRuas && AREAS.filter((area) => area.rotulo).map((area) => (
-          <Rotulo
-            key={`rotulo-${area.nome}`}
-            x={area.rotulo.x * ESCALA}
-            y={area.rotulo.y * ESCALA}
-            texto={area.rotulo.texto}
-            tamanho={2.0}
+          {/* 9. Zonas de pouso */}
+          {ZONAS_POUSO.filter(naVista).map((zona) => (
+            <ZonaPouso key={zona.id} zona={zona} s={s} detalhe={detalhe} />
+          ))}
+
+          {/* 10. Rota: linha tracejada da filial até o destino (só se houver destino).
+              Na missão de órgãos, passa antes pelo hospital da coleta. */}
+          {destino &&
+            (coleta ? [partida, coleta, destino] : [partida, destino]).slice(1).map((ponto, indice, trechos) => {
+              const de = indice === 0 ? partida : trechos[indice - 1];
+              return (
+                <Line
+                  key={indice}
+                  x1={de.x * ESCALA}
+                  y1={de.y * ESCALA}
+                  x2={ponto.x * ESCALA}
+                  y2={ponto.y * ESCALA}
+                  stroke="#0B5CAD"
+                  strokeWidth={0.7 * s}
+                  strokeDasharray={tracejado([2, 1.5], s)}
+                />
+              );
+            })}
+
+          {/* Alcance do paraquedas: círculo de fora = até onde ele consegue planar;
+              círculo de dentro = até onde ele chega com margem para um pouso suave */}
+          {paraquedas && paraquedas.alcance && (
+            <G>
+              <Circle
+                cx={paraquedas.alcance.centro.x * ESCALA}
+                cy={paraquedas.alcance.centro.y * ESCALA}
+                r={paraquedas.alcance.raio * ESCALA}
+                fill="#D32F2F"
+                fillOpacity="0.08"
+                stroke="#D32F2F"
+                strokeWidth={0.4 * s}
+                strokeDasharray={tracejado([1, 1], s)}
+              />
+              <Circle
+                cx={paraquedas.confortavel.centro.x * ESCALA}
+                cy={paraquedas.confortavel.centro.y * ESCALA}
+                r={paraquedas.confortavel.raio * ESCALA}
+                fill="#2E7D32"
+                fillOpacity="0.12"
+                stroke="#2E7D32"
+                strokeWidth={0.3 * s}
+              />
+            </G>
+          )}
+
+          {/* Desvio de emergência: linha laranja do ponto da pane até a zona de pouso */}
+          {desvio && (
+            <Line
+              x1={desvio.origem.x * ESCALA}
+              y1={desvio.origem.y * ESCALA}
+              x2={desvio.destino.x * ESCALA}
+              y2={desvio.destino.y * ESCALA}
+              stroke="#E08A00"
+              strokeWidth={0.9 * s}
+              strokeDasharray={tracejado([2, 1], s)}
+            />
+          )}
+
+          {/* Obstáculos em movimento (guindaste, pássaros) */}
+          {obstaculos.map((obstaculo, indice) => (
+            <Obstaculo key={indice} obstaculo={obstaculo} s={s} />
+          ))}
+
+          {/* 11. Locais: por cima do mapa e da rota. A origem e o destino sempre aparecem
+              com detalhe (letra e nome), mesmo com a cidade inteira na tela */}
+          {visiveis.map((local) => (
+            <Local key={local.id} local={local} s={s} detalhe={detalhe || daRota(local)} comRotulo={rotulados.has(local.id)} />
+          ))}
+
+          {/* Destino livre (escolhido tocando no mapa) */}
+          {destinoLivre && <MarcadorDestino destino={destino} s={s} texto={destino.rotulo || 'Destino'} />}
+          {pontosEntrega
+            .filter((ponto) => !destino || ponto.id !== destino.id)
+            .map((ponto) => (
+              <MarcadorDestino key={ponto.id} destino={ponto} s={s} texto={ponto.rotulo} />
+            ))}
+          {coletaLivre && <MarcadorDestino destino={coleta} s={s} texto={coleta.rotulo || 'Coleta'} cor="#00897B" />}
+
+          {/* Eventos planejados: onde cada um vai acontecer na rota */}
+          {marcadores.map((marcador) => (
+            <MarcadorEvento key={marcador.numero} marcador={marcador} s={s} />
+          ))}
+
+          {/* Outros drones da rede: a rota de cada um (tracejado fino, na cor dele) e o drone */}
+          {outrosDrones.map((outro) => (
+            <G key={outro.id}>
+              <Line
+                x1={outro.rota.origem.x * ESCALA}
+                y1={outro.rota.origem.y * ESCALA}
+                x2={outro.rota.destino.x * ESCALA}
+                y2={outro.rota.destino.y * ESCALA}
+                stroke={outro.cor}
+                strokeWidth={0.4 * s}
+                strokeDasharray={tracejado([1.5, 1.5], s)}
+                opacity="0.7"
+              />
+              <Drone
+                x={outro.x}
+                y={outro.y}
+                altitude={outro.altitude}
+                comParaquedas={outro.comParaquedas}
+                incerteza={0}
+                s={s}
+                cor={outro.cor}
+                nome={outro.id}
+              />
+            </G>
+          ))}
+
+          {/* 11. Drone: por último de tudo, para ficar por cima */}
+          <Drone
+            x={posicaoDrone.x}
+            y={posicaoDrone.y}
+            altitude={altitude}
+            comParaquedas={Boolean(paraquedas) && altitude > 0}
+            incerteza={incerteza}
             s={s}
           />
-        ))}
+        </Svg>
 
-        {/* 9. Zonas de pouso */}
-        {ZONAS_POUSO.filter(naVista).map((zona) => (
-          <ZonaPouso key={zona.id} zona={zona} s={s} detalhe={detalhe} />
-        ))}
-
-        {/* 10. Rota: linha tracejada da filial até o destino (só se houver destino).
-            Na missão de órgãos, passa antes pelo hospital da coleta. */}
-        {destino &&
-          (coleta ? [partida, coleta, destino] : [partida, destino]).slice(1).map((ponto, indice, trechos) => {
-            const de = indice === 0 ? partida : trechos[indice - 1];
-            return (
-              <Line
-                key={indice}
-                x1={de.x * ESCALA}
-                y1={de.y * ESCALA}
-                x2={ponto.x * ESCALA}
-                y2={ponto.y * ESCALA}
-                stroke="#0B5CAD"
-                strokeWidth={0.7 * s}
-                strokeDasharray={tracejado([2, 1.5], s)}
-              />
-            );
-          })}
-
-        {/* Alcance do paraquedas: círculo de fora = até onde ele consegue planar;
-            círculo de dentro = até onde ele chega com margem para um pouso suave */}
-        {paraquedas && paraquedas.alcance && (
-          <G>
-            <Circle
-              cx={paraquedas.alcance.centro.x * ESCALA}
-              cy={paraquedas.alcance.centro.y * ESCALA}
-              r={paraquedas.alcance.raio * ESCALA}
-              fill="#D32F2F"
-              fillOpacity="0.08"
-              stroke="#D32F2F"
-              strokeWidth={0.4 * s}
-              strokeDasharray={tracejado([1, 1], s)}
-            />
-            <Circle
-              cx={paraquedas.confortavel.centro.x * ESCALA}
-              cy={paraquedas.confortavel.centro.y * ESCALA}
-              r={paraquedas.confortavel.raio * ESCALA}
-              fill="#2E7D32"
-              fillOpacity="0.12"
-              stroke="#2E7D32"
-              strokeWidth={0.3 * s}
-            />
-          </G>
-        )}
-
-        {/* Desvio de emergência: linha laranja do ponto da pane até a zona de pouso */}
-        {desvio && (
-          <Line
-            x1={desvio.origem.x * ESCALA}
-            y1={desvio.origem.y * ESCALA}
-            x2={desvio.destino.x * ESCALA}
-            y2={desvio.destino.y * ESCALA}
-            stroke="#E08A00"
-            strokeWidth={0.9 * s}
-            strokeDasharray={tracejado([2, 1], s)}
-          />
-        )}
-
-        {/* Obstáculos em movimento (guindaste, pássaros) */}
-        {obstaculos.map((obstaculo, indice) => (
-          <Obstaculo key={indice} obstaculo={obstaculo} s={s} />
-        ))}
-
-        {/* 11. Locais: por cima do mapa e da rota. A origem e o destino sempre aparecem
-            com detalhe (letra e nome), mesmo com a cidade inteira na tela */}
-        {visiveis.map((local) => (
-          <Local key={local.id} local={local} s={s} detalhe={detalhe || daRota(local)} comRotulo={rotulados.has(local.id)} />
-        ))}
-
-        {/* Destino livre (escolhido tocando no mapa) */}
-        {destinoLivre && <MarcadorDestino destino={destino} s={s} texto={destino.rotulo || 'Destino'} />}
-        {pontosEntrega
-          .filter((ponto) => !destino || ponto.id !== destino.id)
-          .map((ponto) => (
-            <MarcadorDestino key={ponto.id} destino={ponto} s={s} texto={ponto.rotulo} />
-          ))}
-        {coletaLivre && <MarcadorDestino destino={coleta} s={s} texto={coleta.rotulo || 'Coleta'} cor="#00897B" />}
-
-        {/* Eventos planejados: onde cada um vai acontecer na rota */}
-        {marcadores.map((marcador) => (
-          <MarcadorEvento key={marcador.numero} marcador={marcador} s={s} />
-        ))}
-
-        {/* Outros drones da rede: a rota de cada um (tracejado fino, na cor dele) e o drone */}
-        {outrosDrones.map((outro) => (
-          <G key={outro.id}>
-            <Line
-              x1={outro.rota.origem.x * ESCALA}
-              y1={outro.rota.origem.y * ESCALA}
-              x2={outro.rota.destino.x * ESCALA}
-              y2={outro.rota.destino.y * ESCALA}
-              stroke={outro.cor}
-              strokeWidth={0.4 * s}
-              strokeDasharray={tracejado([1.5, 1.5], s)}
-              opacity="0.7"
-            />
-            <Drone
-              x={outro.x}
-              y={outro.y}
-              altitude={outro.altitude}
-              comParaquedas={outro.comParaquedas}
-              incerteza={0}
-              s={s}
-              cor={outro.cor}
-              nome={outro.id}
-            />
-          </G>
-        ))}
-
-        {/* 11. Drone: por último de tudo, para ficar por cima */}
-        <Drone
-          x={posicaoDrone.x}
-          y={posicaoDrone.y}
-          altitude={altitude}
-          comParaquedas={Boolean(paraquedas) && altitude > 0}
-          incerteza={incerteza}
-          s={s}
-        />
-      </Svg>
-
-      {/* 12. Painel por cima do mapa, sem zoom: vento e selo de zoom */}
-      <Svg style={StyleSheet.absoluteFill} viewBox="0 0 100 100" pointerEvents="none">
-        {vento && <IndicadorVento vento={vento} />}
-        {/* Créditos do mapa de ruas (exigidos pelo OpenStreetMap) */}
-        {mapaDeRuas && (
-          <G>
-            <Rect x="61" y="96.2" width="38.5" height="3.6" rx="0.8" fill="#FFFFFF" opacity="0.85" />
-            <Text x="98.8" y="98.8" fontSize="2.2" fill="#444444" textAnchor="end">
-              © colaboradores do OpenStreetMap
-            </Text>
-          </G>
-        )}
-        {/* O selo só aparece no zoom forte (obstáculo perto), não na vista normal do voo */}
-        {vista / ESCALA < 3 && <SeloZoom km={vista / ESCALA} />}
-      </Svg>
-    </Pressable>
+        {/* 12. Painel por cima do mapa, sem zoom: vento e selo de zoom */}
+        <Svg style={StyleSheet.absoluteFill} viewBox="0 0 100 100" pointerEvents="none">
+          {vento && <IndicadorVento vento={vento} />}
+          {/* Créditos do mapa de ruas (exigidos pelo OpenStreetMap) */}
+          {mapaDeRuas && (
+            <G>
+              <Rect x="61" y="96.2" width="38.5" height="3.6" rx="0.8" fill="#FFFFFF" opacity="0.85" />
+              <Text x="98.8" y="98.8" fontSize="2.2" fill="#444444" textAnchor="end">
+                © colaboradores do OpenStreetMap
+              </Text>
+            </G>
+          )}
+          {/* O selo só aparece no zoom forte (obstáculo perto), não na vista normal do voo */}
+          {vista / ESCALA < 3 && <SeloZoom km={vista / ESCALA} />}
+        </Svg>
+      </Pressable>
+      {/* Depois de um zoom com os dedos (ou a roda do mouse): volta para o zoom da simulação */}
+      {fatorZoom !== 1 ? (
+        <Pressable style={styles.botaoZoom} onPress={() => setFatorZoom(1)} accessibilityRole="button">
+          <Texto style={styles.textoBotaoZoom}>Zoom automático</Texto>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -775,5 +788,19 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 12,
     overflow: 'hidden',
+  },
+  botaoZoom: {
+    position: 'absolute',
+    right: 8,
+    bottom: 26, // acima dos créditos do mapa
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(11, 31, 51, 0.85)',
+  },
+  textoBotaoZoom: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });
