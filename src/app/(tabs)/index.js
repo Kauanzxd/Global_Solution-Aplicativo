@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import BuscaDestino from '../../componentes/BuscaDestino';
 import Cabecalho from '../../componentes/Cabecalho';
@@ -17,6 +17,7 @@ import { distanciaKm } from '../../regras/distancia';
 import { algumObstaculoPerto, desenhoObstaculo } from '../../regras/obstaculos';
 import { tipoDoEvento } from '../../dados/tiposEventos';
 import { riscoNoPonto } from '../../regras/risco';
+import { DRONES_DA_REDE, aproximarDrones, avancarRede, criarVooDaRede, montarRede } from '../../regras/rede';
 import { altitudeDoVoo, avancarVoo, estaNoAr, incertezaDoVoo, posicaoNaRota } from '../../regras/voo';
 
 // As filiais (de onde os drones saem) e os hospitais (para onde levam as entregas)
@@ -87,12 +88,17 @@ function configuracaoDoCenario(cenario) {
     coleta: cenario.coleta ? LOCAIS.find((local) => local.id === cenario.coleta) : null,
     prioridade: cenario.prioridade,
     bateria: cenario.bateria,
+    trafego: 0,
     eventos: cenario.eventos.map((evento, indice) => ({ id: `${cenario.id}-${indice}`, ...evento })),
   };
 }
 
 // Como a simulação começa: o primeiro cenário pronto (a entrega tranquila), sem eventos
-const CONFIGURACAO_INICIAL = { ...configuracaoDoCenario(CENARIOS[0]), eventos: [] };
+// e sem outros drones no ar
+const CONFIGURACAO_INICIAL = { ...configuracaoDoCenario(CENARIOS[0]), eventos: [], trafego: 0 };
+
+// Nomes das missões, para o painel dos outros drones
+const NOME_MISSAO = { orgaos: 'órgãos', emergencia: 'emergência', saude: 'saúde', comercial: 'comercial', retorno: 'voltando vazio' };
 
 // Os eventos montados na tela → o formato que o voo (voo.js) entende.
 // Eventos depois do fim do percurso ficam de fora.
@@ -225,10 +231,20 @@ export default function Simular() {
     });
   }, [voo?.mensagem]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Outros drones da rede voando ao mesmo tempo (cada um é um voo de verdade)
+  const [outros, setOutros] = useState([]);
+
   // Começa um voo novo (e esvazia os momentos do voo anterior)
   const iniciar = () => {
     setEtapasDoVoo([]);
+    setOutros(extrasPlanejados.map(criarVooDaRede));
     setVoo(criarVoo(configuracao));
+  };
+
+  // Volta para a montagem (interrompe o voo e tira os outros drones do mapa)
+  const reiniciar = () => {
+    setVoo(null);
+    setOutros([]);
   };
 
   // Qual cenário pronto está carregado (null = o usuário montou ou mexeu em algo)
@@ -308,23 +324,46 @@ export default function Simular() {
   const kmColeta = orgao ? distanciaKm(origem, configuracao.coleta) : undefined;
   const eventos = eventosParaOVoo(configuracao.eventos, distanciaIda + distanciaVolta);
 
-  // Enquanto o drone está no ar, um "relógio" avança o voo a cada PASSO_MS
+  // Os outros drones que vão voar junto: rotas que cruzam a ida do principal
+  const extrasPlanejados = montarRede(
+    paradas,
+    configuracao.trafego,
+    FILIAIS_DO_MAPA,
+    HOSPITAIS_DO_MAPA,
+    orgao ? [configuracao.destino, configuracao.coleta] : [configuracao.destino]
+  );
+
+  // O relógio lê o estado mais recente por estas "referências" (o setInterval guardaria
+  // uma cópia velha do voo e dos outros drones se lesse direto das variáveis)
+  const vooRef = useRef(voo);
+  const outrosRef = useRef(outros);
+  vooRef.current = voo;
+  outrosRef.current = outros;
+
+  // Algum drone ainda voando? (o principal ou um dos outros da rede)
+  const algumNoAr = emVoo || outros.some((outro) => estaNoAr(outro));
+
+  // Enquanto houver drone no ar, um "relógio" avança todos os voos a cada PASSO_MS.
+  // Depois de cada passo, quem ficou perto de outro drone passa a enxergá-lo (e conversam).
   useEffect(() => {
-    if (!emVoo) return; // pousou (ou ainda não saiu): não liga o relógio
+    if (!algumNoAr) return; // todos no chão (ou ainda não saíram): não liga o relógio
 
     const relogio = setInterval(() => {
-      setVoo((atual) => {
-        let proximo = atual;
-        for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
-          proximo = avancarVoo(proximo, PASSO_KM / DECISOES_POR_TIQUE, eventos, regiao);
-        }
-        return proximo;
-      });
+      let principal = vooRef.current;
+      let rede = outrosRef.current;
+      for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
+        const passo = PASSO_KM / DECISOES_POR_TIQUE;
+        [principal, ...rede] = aproximarDrones([avancarVoo(principal, passo, eventos, regiao), ...avancarRede(rede, passo, regiao)]);
+      }
+      vooRef.current = principal;
+      outrosRef.current = rede;
+      setVoo(principal);
+      setOutros(rede);
     }, PASSO_MS);
 
-    // Quando o drone pousa (ou a tela fecha), desliga o relógio
+    // Quando todos pousam (ou a tela fecha), desliga o relógio
     return () => clearInterval(relogio);
-  }, [emVoo]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [algumNoAr]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Antes de simular, o drone está parado na filial de origem
   const posicao = voo ? posicaoNaRota(voo.origem, voo.destino, voo.km) : origem;
@@ -373,9 +412,26 @@ export default function Simular() {
           paraquedas={paraquedas}
           vento={voo ? voo.vento : null}
           incerteza={voo ? incertezaDoVoo(voo) : 0}
-          obstaculos={voo ? (voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo)) : []}
+          // Os drones da rede já aparecem de verdade no mapa (outrosDrones): o "obstáculo" que o
+          // nosso drone usa para calcular o desvio deles não é desenhado, para não ficar duplicado
+          obstaculos={
+            voo
+              ? (voo.obstaculos || [])
+                  .filter((obstaculo) => !outros.some((outro) => outro.idDrone === obstaculo.id))
+                  .map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo))
+              : []
+          }
           vista={vista}
           marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, paradas) : []}
+          outrosDrones={outros.map((outro, indice) => ({
+            id: outro.idDrone,
+            x: posicaoNaRota(outro.origem, outro.destino, outro.km).x,
+            y: posicaoNaRota(outro.origem, outro.destino, outro.km).y,
+            altitude: outro.espera > 0 ? 0 : altitudeDoVoo(outro),
+            cor: DRONES_DA_REDE[indice].cor,
+            rota: { origem: outro.hub || outro.origem, destino: outro.destinoFinal || outro.destino },
+            comParaquedas: Boolean(outro.paraquedasAberto) && altitudeDoVoo(outro) > 0,
+          }))}
           aoTocar={voo === null ? tocarNoMapa : undefined}
         />
       </View>
@@ -477,6 +533,23 @@ export default function Simular() {
             />
           </Secao>
 
+          <Secao
+            titulo="Outros drones no ar"
+            dica="Drones da rede voando ao mesmo tempo, com rotas que cruzam a sua: eles se enxergam e combinam pelo rádio quem desvia"
+          >
+            <Contador valor={configuracao.trafego} passo={1} minimo={0} maximo={3} sufixo="" aoMudar={(valor) => mudar('trafego', valor)} />
+            {extrasPlanejados.map((extra) => (
+              <Text key={extra.idDrone} style={styles.itemRede}>
+                {extra.idDrone} · {NOME_MISSAO[extra.prioridade]}: {extra.origem.nome} → {extra.destino.rotulo}
+              </Text>
+            ))}
+            {extrasPlanejados.length < configuracao.trafego ? (
+              <Text style={styles.dicaRede}>
+                Só {extrasPlanejados.length === 1 ? 'uma rota cruza' : `${extrasPlanejados.length} rotas cruzam`} esta ida no momento certo: os outros ficam na filial.
+              </Text>
+            ) : null}
+          </Secao>
+
           <Pressable
             style={[styles.botao, !podeIniciar && styles.botaoDesligado]}
             onPress={iniciar}
@@ -501,7 +574,12 @@ export default function Simular() {
           </Text>
           <Text style={styles.status}>{voo.mensagem}</Text>
           <Text style={styles.bateria}>Bateria: {Math.round(voo.bateria)}%</Text>
-          <Pressable style={[styles.botao, styles.botaoSecundario]} onPress={() => setVoo(null)}>
+          {outros.map((outro) => (
+            <Text key={outro.idDrone} style={styles.itemRede}>
+              {outro.idDrone} ({NOME_MISSAO[outro.prioridade] || outro.prioridade}): {outro.espera > 0 ? 'aguardando a vez na filial' : outro.mensagem}
+            </Text>
+          ))}
+          <Pressable style={[styles.botao, styles.botaoSecundario]} onPress={reiniciar}>
             <Text style={[styles.textoBotao, styles.textoSecundario]}>{emVoo ? 'Interromper e reiniciar' : 'Nova simulação'}</Text>
           </Pressable>
         </View>
@@ -678,6 +756,16 @@ const styles = StyleSheet.create({
   },
   textoSecundario: {
     color: TEMA.marca,
+  },
+  itemRede: {
+    marginTop: 8,
+    fontSize: 13,
+    color: TEMA.texto,
+  },
+  dicaRede: {
+    marginTop: 8,
+    fontSize: 12,
+    color: TEMA.textoSuave,
   },
   motivo: {
     marginTop: 8,

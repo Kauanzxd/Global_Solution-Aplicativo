@@ -33,6 +33,7 @@ const ERRO_GPS_DELE_KM = 0.05; // se ele está sem GPS, a posição que ele tran
 // drone (o desempate por identificação compara esses nomes).
 function nomeDoDrone(idDoEvento) {
   if (idDoEvento === undefined) return 'SADEC-07';
+  if (String(idDoEvento).startsWith('SADEC-')) return idDoEvento; // já é um nome de rádio (drone da rede)
   let soma = 0;
   for (const letra of String(idDoEvento)) soma += letra.charCodeAt(0);
   const numero = 2 + (soma % 98); // de 2 a 99

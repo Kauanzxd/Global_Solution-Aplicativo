@@ -201,6 +201,8 @@ function continuar(voo) {
     bateria: voo.bateria,
     temperaturaAlta: voo.temperaturaAlta,
     prioridade: voo.prioridade, // tipo de missão: orgaos, emergencia, saude ou comercial
+    idDrone: voo.idDrone, // nome de rádio (drones da rede); sem ele, é o SADEC-01
+    dronesVistos: voo.dronesVistos, // drones da rede que este já enxergou (cada um só uma vez)
     tempo: voo.tempo, // relógio da simulação, em segundos
     obstaculos: voo.obstaculos, // obstáculos em movimento já em cena
     etapa: voo.etapa, // 'ida' ou 'volta'
@@ -986,12 +988,31 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
   };
 }
 
+// ---------- Drones da rede voando ao mesmo tempo ----------
+// Na simulação com vários drones, cada um é um voo de verdade. Quando dois se aproximam,
+// o outro entra em cena para este voo como um "drone com rádio" (o mesmo obstáculo dos
+// eventos), vindo pela rota: a partir daí, a conversa pelo rádio e o desvio são os de sempre.
+// "outro": { id, prioridade, bateria } do drone avistado. Só entra uma vez por drone.
+export function avistarDrone(voo, outro) {
+  const manobrando = voo.situacao === 'voando' || voo.situacao === 'desviando' || voo.situacao === 'afastando';
+  if (!manobrando) return voo;
+  // Cada encontro acontece uma vez só: depois que o obstáculo sai de cena, o mesmo drone
+  // não volta a "aparecer" enquanto os dois ainda estão por perto
+  const vistos = voo.dronesVistos || [];
+  if (vistos.includes(outro.id)) return voo;
+  const evento = { tipo: 'drone', id: outro.id, comunicacao: true, prioridade: outro.prioridade, bateria: Math.round(outro.bateria ?? 60) };
+  const novo = criarObstaculo(evento, posicaoAtual(voo), direcaoDoTrecho(voo), voo.tempo || 0);
+  return { ...voo, obstaculos: [...(voo.obstaculos || []), novo], dronesVistos: [...vistos, outro.id] };
+}
+
 // ---------- Conversa entre drones ----------
 // Ao se ouvirem pelo rádio (500 m), os dois drones trocam id, prioridade e bateria,
 // e cada um roda a mesma regra (quemDesvia). Como os dados e a regra são iguais,
 // os dois chegam ao mesmo acordo: só um desvia, pela direita; o outro segue reto.
 function negociar(voo, outro) {
-  const nos = { id: ID_NOSSO_DRONE, prioridade: voo.prioridade ?? 'saude', bateria: Math.round(voo.bateria ?? 100) };
+  // Cada drone da rede tem o seu nome de rádio (voo.idDrone); o da simulação principal é o SADEC-01
+  const meuId = voo.idDrone ?? ID_NOSSO_DRONE;
+  const nos = { id: meuId, prioridade: voo.prioridade ?? 'saude', bateria: Math.round(voo.bateria ?? 100) };
   const dele = { id: outro.id, prioridade: outro.prioridade, bateria: Math.round(outro.bateria) };
   const { desvia, criterio } = quemDesvia(nos, dele);
 
@@ -1001,7 +1022,7 @@ function negociar(voo, outro) {
   const nomeNos = PRIORIDADES[nos.prioridade].nome;
   const nomeDele = PRIORIDADES[dele.prioridade].nome;
   const decisao =
-    desvia === ID_NOSSO_DRONE
+    desvia === meuId
       ? `nós (${nomeNos}, ${nos.bateria}%) desviamos pela direita; ${outro.id} (${nomeDele}) segue reto`
       : `${outro.id} (${nomeDele}, ${dele.bateria}%) desvia pela direita; nós (${nomeNos}) seguimos reto`;
 

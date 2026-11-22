@@ -148,7 +148,8 @@ function ZonaPouso({ zona, s, detalhe }) {
 // O drone visto de cima: dois braços em "X" com uma hélice em cada ponta.
 // A altitude aparece de dois jeitos: o número em metros acima do drone e uma
 // sombra no chão que se afasta dele quanto mais alto ele está.
-function Drone({ x, y, altitude, comParaquedas, incerteza, s }) {
+// "cor" (opcional): cor do corpo; "nome" (opcional): nome de rádio, para os outros drones da rede
+function Drone({ x, y, altitude, comParaquedas, incerteza, s, cor = '#0B1F33', nome }) {
   const cx = x * ESCALA;
   const cy = y * ESCALA;
   const braco = 2.2 * s;
@@ -161,13 +162,13 @@ function Drone({ x, y, altitude, comParaquedas, incerteza, s }) {
   return (
     <G>
       <Circle cx={cx + afastamentoSombra} cy={cy + afastamentoSombra} r={2.4 * s} fill="#000000" opacity="0.2" />
-      <Line x1={cx - braco} y1={cy - braco} x2={cx + braco} y2={cy + braco} stroke="#0B1F33" strokeWidth={0.6 * s} />
-      <Line x1={cx - braco} y1={cy + braco} x2={cx + braco} y2={cy - braco} stroke="#0B1F33" strokeWidth={0.6 * s} />
-      <Circle cx={cx - braco} cy={cy - braco} r={helice} fill="#FFFFFF" stroke="#0B1F33" strokeWidth={traco} />
-      <Circle cx={cx + braco} cy={cy - braco} r={helice} fill="#FFFFFF" stroke="#0B1F33" strokeWidth={traco} />
-      <Circle cx={cx - braco} cy={cy + braco} r={helice} fill="#FFFFFF" stroke="#0B1F33" strokeWidth={traco} />
-      <Circle cx={cx + braco} cy={cy + braco} r={helice} fill="#FFFFFF" stroke="#0B1F33" strokeWidth={traco} />
-      <Circle cx={cx} cy={cy} r={1.0 * s} fill="#0B1F33" />
+      <Line x1={cx - braco} y1={cy - braco} x2={cx + braco} y2={cy + braco} stroke={cor} strokeWidth={0.6 * s} />
+      <Line x1={cx - braco} y1={cy + braco} x2={cx + braco} y2={cy - braco} stroke={cor} strokeWidth={0.6 * s} />
+      <Circle cx={cx - braco} cy={cy - braco} r={helice} fill="#FFFFFF" stroke={cor} strokeWidth={traco} />
+      <Circle cx={cx + braco} cy={cy - braco} r={helice} fill="#FFFFFF" stroke={cor} strokeWidth={traco} />
+      <Circle cx={cx - braco} cy={cy + braco} r={helice} fill="#FFFFFF" stroke={cor} strokeWidth={traco} />
+      <Circle cx={cx + braco} cy={cy + braco} r={helice} fill="#FFFFFF" stroke={cor} strokeWidth={traco} />
+      <Circle cx={cx} cy={cy} r={1.0 * s} fill={cor} />
       {comParaquedas && (
         <G>
           {/* Cordas: do drone até as pontas da cúpula */}
@@ -182,7 +183,7 @@ function Drone({ x, y, altitude, comParaquedas, incerteza, s }) {
           />
         </G>
       )}
-      <Rotulo x={cx} y={alturaRotulo} texto={`${altitude} m`} tamanho={2.4} s={s} />
+      <Rotulo x={cx} y={alturaRotulo} texto={nome ? `${nome} · ${altitude} m` : `${altitude} m`} tamanho={2.4} s={s} />
       {/* Sem GPS: o tamanho do erro da posição, embaixo do drone */}
       {incerteza > 0 && <Rotulo x={cx} y={cy + 6 * s} texto={`sem GPS ±${incerteza} m`} tamanho={2} s={s} />}
     </G>
@@ -409,8 +410,11 @@ function MarcadorEvento({ marcador, s }) {
 // "aoTocar" (opcional): função chamada com o ponto { x, y } em km onde o usuário tocou
 // "marcadores" (opcional): eventos planejados [{ x, y, cor, numero }], desenhados na rota
 // "coleta" (opcional): missão de órgãos, o hospital onde o órgão é retirado (a rota passa por ele)
+// "outrosDrones" (opcional): drones da rede voando ao mesmo tempo
+//   [{ id, x, y, altitude, cor, rota: { origem, destino }, comParaquedas }]
 export default function Mapa({
   marcadores = [],
+  outrosDrones = [],
   coleta,
   destino,
   origem,
@@ -669,6 +673,32 @@ export default function Mapa({
         {/* Eventos planejados: onde cada um vai acontecer na rota */}
         {marcadores.map((marcador) => (
           <MarcadorEvento key={marcador.numero} marcador={marcador} s={s} />
+        ))}
+
+        {/* Outros drones da rede: a rota de cada um (tracejado fino, na cor dele) e o drone */}
+        {outrosDrones.map((outro) => (
+          <G key={outro.id}>
+            <Line
+              x1={outro.rota.origem.x * ESCALA}
+              y1={outro.rota.origem.y * ESCALA}
+              x2={outro.rota.destino.x * ESCALA}
+              y2={outro.rota.destino.y * ESCALA}
+              stroke={outro.cor}
+              strokeWidth={0.4 * s}
+              strokeDasharray={tracejado([1.5, 1.5], s)}
+              opacity="0.7"
+            />
+            <Drone
+              x={outro.x}
+              y={outro.y}
+              altitude={outro.altitude}
+              comParaquedas={outro.comParaquedas}
+              incerteza={0}
+              s={s}
+              cor={outro.cor}
+              nome={outro.id}
+            />
+          </G>
         ))}
 
         {/* 11. Drone: por último de tudo, para ficar por cima */}
