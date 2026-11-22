@@ -8,7 +8,7 @@ import { bipDeFim, chiadoDeAbertura } from './somDeRadio';
 // responde true: a tela usa isso para manter a câmera lenta até a fala terminar.
 
 const IDIOMA = 'pt-BR';
-const RITMO = 1.2; // mais rápido que o normal, como a fala de rádio (e para não atrasar em relação ao mapa)
+const RITMO = 1.4; // bem mais rápido que o normal, como a fala de rádio (e para não atrasar em relação ao mapa)
 const FILA_MAXIMA = 8; // cabe um relato inteiro; com muitos drones, as falas de rotina mais antigas saem primeiro
 
 // Cada drone fala com uma voz diferente (quando o aparelho tem mais de uma em português)
@@ -29,9 +29,13 @@ function numeroDoDrone(nome) {
   return achado ? Number(achado[1]) : 0;
 }
 
-// Texto do rádio → texto falado (siglas e unidades por extenso, como um operador falaria)
+// Texto do rádio → texto falado, curto, como um operador falaria: os detalhes entre
+// parênteses (bateria, motivo da escolha) ficam só na tela; siglas e unidades por extenso
 export function textoParaFala(texto) {
   return texto
+    .replace(/\s*\([^)]*\)/g, '') // tira os detalhes entre parênteses
+    .replace(/Checando as zonas de pouso mais próximas/g, 'Checando zonas')
+    .replace(/Conversa pelo rádio\.{3}\s*/g, '') // a conversa já está acontecendo no rádio
     .replace(/SADEC-0*(\d+)/g, 'Sadec $1') // "SADEC-01" → "Sadec 1"
     .replace(/\bZP-/g, 'zona de pouso ') // "ZP-Carmo" → "zona de pouso Carmo"
     .replace(/(\d)\.(\d)/g, '$1,$2') // decimal com vírgula: "2.05" → "2,05"
@@ -39,8 +43,8 @@ export function textoParaFala(texto) {
     .replace(/(\d+(?:,\d+)?) ?km\b/g, '$1 quilômetros') // "4,2 km" → "4,2 quilômetros"
     .replace(/(\d+) ?m\b/g, '$1 metros') // "120 m" → "120 metros"
     .replace(/\.{3}/g, '.') // reticências viram uma pausa simples
-    .replace(/\s*\(/g, ', ') // parênteses viram pausas
-    .replace(/\)/g, '');
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Como no rádio de aviação: quem fala, para quem, a mensagem e "câmbio" nos eventos.
@@ -48,15 +52,18 @@ export function textoParaFala(texto) {
 // "parte" (relatos de várias linhas, uma transmissão só): 'inicio', 'meio' ou 'fim'.
 // Só o início tem a abertura; só o fim tem o "câmbio".
 function fraseDeRadio({ nome, texto, evento, parte }) {
-  const abertura = nome.startsWith('Central') ? `${nome} a todos os drones` : `${nome} para Central`;
+  const abertura = nome.startsWith('Central') ? 'Central' : nome; // só o nome de rádio, para ser curto
   const comAbertura = !parte || parte === 'inicio';
   const comCambio = evento && (!parte || parte === 'fim');
-  return `${comAbertura ? `${abertura}: ` : ''}${texto}${comCambio ? ' Câmbio.' : ''}`;
+  // Antes do "câmbio", a frase precisa terminar com ponto (senão a voz emenda as duas)
+  const frase = comCambio ? `${texto.replace(/[.!]*$/, '.')} Câmbio.` : texto;
+  return `${comAbertura ? `${abertura}: ` : ''}${frase}`;
 }
 
 // Quanto tempo uma fala deve levar (para destravar a fila se a voz não avisar que acabou)
+// (uns 70 ms por letra no ritmo normal; mais rápido, proporcionalmente menos)
 function duracaoEstimadaMs(texto) {
-  return 1500 + texto.length * 75;
+  return 1000 + (texto.length * 70) / RITMO;
 }
 
 export default function useVozDoRadio() {
@@ -114,7 +121,11 @@ export default function useVozDoRadio() {
   // Coloca mensagens na fila. "mensagens": [{ nome, texto, evento }]
   const falar = (mensagens) => {
     if (!ligadaRef.current || mensagens.length === 0) return;
-    mensagens.forEach((mensagem) => fila.current.push({ nome: mensagem.nome, texto: fraseDeRadio(mensagem), evento: mensagem.evento, parte: mensagem.parte }));
+    // No relato, a voz fala só o começo ("checando zonas") e a decisão; a lista das zonas
+    // checadas (as linhas do meio) fica só na tela
+    mensagens
+      .filter((mensagem) => mensagem.parte !== 'meio')
+      .forEach((mensagem) => fila.current.push({ nome: mensagem.nome, texto: fraseDeRadio(mensagem), evento: mensagem.evento, parte: mensagem.parte }));
     // Fila cheia: descarta primeiro as falas de rotina mais antigas, depois as mais antigas
     while (fila.current.length > FILA_MAXIMA) {
       const rotina = fila.current.findIndex((item) => !item.evento && !item.parte);
