@@ -16,7 +16,8 @@ const MAXIMO_RESULTADOS = 6;
 
 // Busca de destino: digita parte do nome ou do bairro e escolhe o hospital na lista.
 // "locais": onde procurar | "aoEscolher": recebe o local escolhido
-export default function BuscaDestino({ locais, aoEscolher }) {
+// "placeholder" (opcional): o texto de ajuda do campo (por padrão, a busca de hospital)
+export default function BuscaDestino({ locais, aoEscolher, placeholder = 'Buscar hospital por nome ou bairro' }) {
   const [texto, setTexto] = useState('');
 
   // Só procura com 2 letras ou mais (com 1 letra, quase tudo combina)
@@ -39,7 +40,7 @@ export default function BuscaDestino({ locais, aoEscolher }) {
         style={styles.campo}
         value={texto}
         onChangeText={setTexto}
-        placeholder="Buscar hospital por nome ou bairro"
+        placeholder={placeholder}
         placeholderTextColor={TEMA.textoSuave}
         autoCorrect={false}
       />

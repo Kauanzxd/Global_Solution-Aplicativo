@@ -13,8 +13,9 @@
 // 'pouso-paraquedas', 'pousou-hub', 'aguardando-resgate' e 'queda'.
 //
 // Etapas da missão (voo.etapa): 'ida' (hub → ponto de entrega) e 'volta' (de volta ao hub).
-// Na missão de órgãos (voo.coleta definido), antes da ida vem a 'coleta':
-// hub → hospital da coleta (pousa e pega o órgão) → hospital da entrega → filial.
+// Com um ponto de coleta (voo.coleta definido), antes da ida vem a 'coleta':
+// hub → ponto da coleta (pousa e pega a carga) → ponto da entrega → filial.
+// Na missão de órgãos, a coleta é num hospital; num pedido, numa loja ou farmácia.
 //
 // Eventos acontecem no "km da viagem", contado pelo HODÔMETRO: a distância total
 // voada desde o hub, somando todos os trechos (como o odômetro de um carro).
@@ -182,6 +183,13 @@ function filialMaisProxima(local, zonas) {
   return filiais.reduce((melhor, filial) => (distanciaKm(local, filial) < distanciaKm(local, melhor) ? filial : melhor));
 }
 
+// A carga, pelo tipo de missão, para as mensagens da coleta ("o órgão", "o remédio"...).
+// Todas começam com "o ", então "d" + carga vira "do órgão", "do remédio"...
+const CARGAS = { orgaos: 'o órgão', emergencia: 'o suprimento', saude: 'o remédio', comercial: 'o pedido' };
+function cargaDo(voo) {
+  return CARGAS[voo.prioridade] || 'a carga';
+}
+
 // Primeira letra maiúscula (para começar uma frase com o nome da zona)
 function maiuscula(texto) {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
@@ -208,7 +216,7 @@ function continuar(voo) {
     etapa: voo.etapa, // 'ida' ou 'volta'
     hub: voo.hub, // de onde o drone saiu (e para onde volta)
     destinoFinal: voo.destinoFinal, // o alvo da etapa: ponto de entrega na ida, hub na volta
-    destinoEntrega: voo.destinoEntrega, // missão de órgãos: o hospital da entrega (depois da coleta)
+    destinoEntrega: voo.destinoEntrega, // com coleta: o ponto da entrega (depois da coleta)
     // GPS
     semGps: voo.semGps,
     incerteza: voo.incerteza,
@@ -327,7 +335,7 @@ function decolar(voo, eventos, passoKm, regiao) {
     const vento = ventoNoKm0 ? criarVento(ventoNoKm0) : voo.vento;
     let mensagem = 'Voando...';
     if (voo.etapa === 'volta') mensagem = 'Voltando para a filial...';
-    else if (voo.etapa === 'ida' && voo.destinoEntrega) mensagem = `Levando o órgão para ${voo.destinoEntrega.nome}...`;
+    else if (voo.etapa === 'ida' && voo.destinoEntrega) mensagem = `Levando ${cargaDo(voo)} para ${voo.destinoEntrega.nome}...`;
     if (ventoNoKm0) mensagem = textoVento(vento);
     // O hodômetro conta a viagem inteira: na volta, continua de onde parou
     return { ...voo, altitude, situacao: 'voando', hodometro: voo.hodometro ?? 0, vento, mensagem };
@@ -355,7 +363,7 @@ function entregar(voo, passoKm, regiao) {
   const local = posicaoAtual(voo);
   const tem = voo.bateria ?? 100;
 
-  // Missão de órgãos: aqui foi a COLETA. Pega o órgão e decola para o hospital da entrega,
+  // Aqui foi a COLETA (órgão, remédio, pedido...). Pega a carga e decola para a entrega,
   // se a bateria cobrir a entrega e, depois, a ida até uma zona controlada (com a margem).
   if (voo.etapa === 'coleta') return decolarComOrgao(voo, local, tem, regiao);
 
@@ -422,7 +430,7 @@ function entregar(voo, passoKm, regiao) {
   };
 }
 
-// Depois da coleta: decola com o órgão para o hospital da entrega
+// Depois da coleta: decola com a carga para o ponto da entrega
 function decolarComOrgao(voo, local, tem, regiao) {
   const entrega = voo.destinoEntrega;
   const zonaDepois = zonaMaisProxima(entrega, regiao.zonas);
@@ -431,7 +439,7 @@ function decolarComOrgao(voo, local, tem, regiao) {
     return {
       ...voo,
       situacao: 'aguardando-resgate',
-      mensagem: `Órgão coletado, mas a bateria (${Math.round(tem)}%) não cobre a entrega com margem (${Math.round(precisa)}%). O drone fica no hospital e o órgão segue por outro meio de transporte`,
+      mensagem: `${maiuscula(cargaDo(voo).slice(2))} coletado, mas a bateria (${Math.round(tem)}%) não cobre a entrega com margem (${Math.round(precisa)}%). O drone fica no ponto da coleta e ${cargaDo(voo)} segue por outro meio de transporte`,
     };
   }
   return {
@@ -443,7 +451,7 @@ function decolarComOrgao(voo, local, tem, regiao) {
     altitude: 0,
     etapa: 'ida',
     situacao: 'decolando',
-    mensagem: `Órgão coletado! Decolando para ${entrega.nome}`,
+    mensagem: `${maiuscula(cargaDo(voo).slice(2))} coletado! Decolando para ${entrega.nome}`,
   };
 }
 
@@ -455,7 +463,7 @@ function bateriaParaTerminar(voo, local, regiao) {
     const oQue = alvo.ehHub ? `a volta ${comArtigo(alvo, 'à')}` : `a ida ${comArtigo(alvo, 'à')}`;
     return { precisa: bateriaParaChegar(distanciaKm(local, alvo)), oQue };
   }
-  // Na coleta: chegar ao hospital da coleta, pousar, subir, levar o órgão até a entrega e,
+  // Na coleta: chegar ao ponto da coleta, pousar, subir, levar a carga até a entrega e,
   // de lá, ainda chegar a uma zona controlada
   if (voo.etapa === 'coleta') {
     const coleta = voo.destinoFinal;
@@ -464,7 +472,7 @@ function bateriaParaTerminar(voo, local, regiao) {
     const distancia = distanciaKm(local, coleta) + distanciaKm(coleta, entrega);
     return {
       precisa: bateriaParaEntregarEIrAZona(distancia, zonaDepois.distancia) + BATERIA_POUSO_VERTICAL * 2 * (1 + MARGEM_SEGURANCA),
-      oQue: 'a coleta e a entrega do órgão',
+      oQue: `a coleta e a entrega d${cargaDo(voo)}`,
     };
   }
   const destino = voo.destinoFinal;
@@ -1155,9 +1163,11 @@ function chegarAoFim(voo, total) {
     return iniciarDescida(
       chegou,
       ALTITUDE_CRUZEIRO,
-      `Sobre ${voo.destino.nome}: descendo para coletar o órgão`,
+      `Sobre ${voo.destino.nome}: descendo para coletar ${cargaDo(voo)}`,
       'entregando',
-      'Pousou no hospital da coleta: carregando o órgão na caixa térmica...'
+      voo.prioridade === 'orgaos'
+        ? 'Pousou no hospital da coleta: carregando o órgão na caixa térmica...'
+        : `Pousou em ${voo.destino.nome}: carregando ${cargaDo(voo)}...`
     );
   }
 
@@ -1209,7 +1219,7 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   if (!estaNoAr(voo)) return voo;
 
   // No começo: guarda o hub (de onde saiu), o ponto de entrega e a etapa da missão.
-  // Missão de órgãos: o primeiro alvo é o hospital da coleta; a entrega fica guardada.
+  // Com coleta: o primeiro alvo é o ponto da coleta; a entrega fica guardada.
   if (voo.hub === undefined && voo.coleta) {
     voo = { ...voo, destinoEntrega: voo.destino, destino: voo.coleta, destinoFinal: voo.coleta, etapa: 'coleta' };
   }
@@ -1218,7 +1228,7 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
     voo = { ...voo, hub: voo.origem, etapa: voo.etapa || 'ida' };
 
     // Regra que vale sempre: só decola se a bateria cobrir o percurso inteiro, com margem
-    // (ida + volta; na missão de órgãos, filial → coleta → entrega → filial)
+    // (ida + volta; com coleta, filial → coleta → entrega → filial)
     if (voo.bateria !== undefined) {
       const decolagem = voo.destinoEntrega
         ? verificarPercurso([voo.origem, voo.coleta, voo.destinoEntrega, filialMaisProxima(voo.destinoEntrega, regiao.zonas) || voo.origem], voo.bateria)
