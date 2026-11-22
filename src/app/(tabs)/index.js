@@ -281,6 +281,10 @@ export default function Simular() {
 
   // Até que horas (Date.now) a câmera lenta vale; o estado só serve para mostrar o aviso
   const cameraLentaAte = useRef(0);
+
+  // Rolagem da tela: ao iniciar a simulação, a tela sobe até o mapa
+  const rolagem = useRef(null);
+  const topoDoMapa = useRef(0); // onde o mapa começa dentro da tela (medido pelo onLayout)
   const [cameraLenta, setCameraLenta] = useState(false);
 
   // Pedidos feitos na aba Pedidos: um deles pode chegar aqui para virar o voo
@@ -293,6 +297,8 @@ export default function Simular() {
     ultimaDoDrone.current = {};
     cameraLentaAte.current = 0;
     setCameraLenta(false);
+    // Sobe a tela até o mapa (com um respiro abaixo da barra de status do celular)
+    if (rolagem.current) rolagem.current.scrollTo({ y: Math.max(topoDoMapa.current - margens.top - 8, 0), animated: true });
     setOutros(extrasPlanejados.map(criarVooDaRede));
     setVoo(criarVoo(configuracao));
     if (configuracao.pedido) atualizarStatus(configuracao.pedido.codigo, 'Em voo');
@@ -558,10 +564,10 @@ export default function Simular() {
   ) : null;
 
   return (
-    <ScrollView style={styles.tela} contentContainerStyle={[styles.conteudo, { paddingTop: margens.top + 20 }]}>
+    <ScrollView ref={rolagem} style={styles.tela} contentContainerStyle={[styles.conteudo, { paddingTop: margens.top + 20 }]}>
       <Cabecalho titulo="Simular voo" subtitulo="Monte uma situação e veja o drone em ação" />
 
-      <View style={styles.areaMapa}>
+      <View style={styles.areaMapa} onLayout={(evento) => (topoDoMapa.current = evento.nativeEvent.layout.y)}>
         <Mapa
           coleta={comColeta ? configuracao.coleta : undefined}
           pontosEntrega={configuracao.operacao ? configuracao.operacao.abrigos : []}
