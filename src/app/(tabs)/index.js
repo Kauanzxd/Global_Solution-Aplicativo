@@ -11,7 +11,7 @@ import Secao from '../../componentes/Secao';
 import { TEMA } from '../../componentes/tema';
 import { CENARIOS } from '../../dados/cenarios';
 import { AREAS, LOCAIS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../../dados/regiao';
-import { verificarDecolagem } from '../../regras/bateria';
+import { verificarPercurso } from '../../regras/bateria';
 import { distanciaKm } from '../../regras/distancia';
 import { algumObstaculoPerto, desenhoObstaculo } from '../../regras/obstaculos';
 import { tipoDoEvento } from '../../dados/tiposEventos';
@@ -29,10 +29,44 @@ const ZONAS_E_FILIAIS = [
   ...FILIAIS_DO_MAPA.map((filial) => ({ id: filial.nome, x: filial.x, y: filial.y, ehHub: true })),
 ];
 
-// De qual filial sai a missão: a mais perto do destino (é a que gasta menos bateria)
+// A filial mais perto de um ponto (é a que gasta menos bateria)
 function filialDaMissao(destino) {
   return FILIAIS_DO_MAPA.reduce((melhor, filial) =>
     distanciaKm(destino, filial) < distanciaKm(destino, melhor) ? filial : melhor
+  );
+}
+
+// Missão de órgãos? Só quando o tipo é órgãos E há um hospital de coleta escolhido
+function ehMissaoOrgao(configuracao) {
+  return configuracao.prioridade === 'orgaos' && Boolean(configuracao.coleta);
+}
+
+// As paradas da missão, da filial de saída até a filial de chegada:
+//   entrega normal: [filial, destino, filial] (sai da filial mais perto do destino e volta a ela);
+//   órgãos: [filial, coleta, entrega, filial] (sai da filial mais perto da coleta e
+//   volta à filial mais perto do hospital da entrega).
+function percursoDa(configuracao) {
+  if (ehMissaoOrgao(configuracao)) {
+    const { coleta, destino } = configuracao;
+    return [filialDaMissao(coleta), coleta, destino, filialDaMissao(destino)];
+  }
+  const filial = filialDaMissao(configuracao.destino);
+  return [filial, configuracao.destino, filial];
+}
+
+// Tamanho de um percurso (soma dos trechos), em km
+function tamanhoDe(paradas) {
+  let total = 0;
+  for (let i = 1; i < paradas.length; i++) total += distanciaKm(paradas[i - 1], paradas[i]);
+  return total;
+}
+
+// Hospital de coleta sugerido ao escolher "Órgãos": o hospital mais perto do destino que
+// fique a pelo menos 2 km dele (para a coleta e a entrega não serem quase o mesmo lugar)
+function coletaSugerida(destino) {
+  const candidatos = HOSPITAIS_DO_MAPA.filter((hospital) => distanciaKm(hospital, destino) >= 2);
+  return candidatos.reduce((melhor, hospital) =>
+    distanciaKm(hospital, destino) < distanciaKm(melhor, destino) ? hospital : melhor
   );
 }
 
@@ -49,6 +83,7 @@ const MISSOES = [
 function configuracaoDoCenario(cenario) {
   return {
     destino: LOCAIS.find((local) => local.id === cenario.destino),
+    coleta: cenario.coleta ? LOCAIS.find((local) => local.id === cenario.coleta) : null,
     prioridade: cenario.prioridade,
     bateria: cenario.bateria,
     eventos: cenario.eventos.map((evento, indice) => ({ id: `${cenario.id}-${indice}`, ...evento })),
@@ -59,10 +94,10 @@ function configuracaoDoCenario(cenario) {
 const CONFIGURACAO_INICIAL = { ...configuracaoDoCenario(CENARIOS[0]), eventos: [] };
 
 // Os eventos montados na tela → o formato que o voo (voo.js) entende.
-// Eventos depois do fim da rota (ida + volta) ficam de fora.
-function eventosParaOVoo(eventos, distanciaIda) {
+// Eventos depois do fim do percurso ficam de fora.
+function eventosParaOVoo(eventos, distanciaTotal) {
   return eventos
-    .filter((evento) => evento.km <= distanciaIda * 2 + 0.001)
+    .filter((evento) => evento.km <= distanciaTotal + 0.001)
     .map((evento) => {
       const pronto = { ...evento };
       // GPS "não volta" = sem duração (é assim que o voo entende)
@@ -85,16 +120,25 @@ const PASSO_MS = 50; // a cada 50 milissegundos o drone anda um pouquinho
 const PASSO_KM = KM_POR_SEGUNDO * (PASSO_MS / 1000);
 const DECISOES_POR_TIQUE = 4; // 4 decisões por atualização da tela: reage mais rápido
 
-// Enquadramento de uma rota: o meio entre a filial e o destino, com folga em volta
+// Enquadramento de uma rota: o meio de todas as paradas, com folga em volta
 // (no mínimo 8 km, para não ficar perto demais em rotas curtas)
-function focoDaRota(destino) {
-  const origem = filialDaMissao(destino);
-  const centro = { x: (origem.x + destino.x) / 2, y: (origem.y + destino.y) / 2 };
-  return { centro, km: Math.max(distanciaKm(origem, destino) * 1.6, 8) };
+function focoDaRota(configuracao) {
+  const paradas = percursoDa(configuracao);
+  const xs = paradas.map((p) => p.x);
+  const ys = paradas.map((p) => p.y);
+  const centro = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  const lado = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  return { centro, km: Math.max(lado * 1.6, 8) };
 }
 
 // O destino escolhido é válido? Devolve o problema em texto, ou null se estiver tudo certo.
-function problemaDoDestino(destino, origem) {
+function problemaDoDestino(configuracao, origem) {
+  const { destino } = configuracao;
+  if (ehMissaoOrgao(configuracao)) {
+    if (destino.tipo !== 'hospital') return 'O órgão precisa ser entregue num hospital: escolha um hospital como destino.';
+    if (destino.id === configuracao.coleta.id) return 'A coleta e a entrega estão no mesmo hospital: escolha hospitais diferentes.';
+    return null;
+  }
   if (distanciaKm(origem, destino) < 0.3) return 'O destino está colado na filial: escolha um ponto mais longe.';
   // Hospitais sempre podem receber (são pontos reais de entrega). Um ponto livre em cima
   // de rodovia ou trilho, não.
@@ -104,41 +148,47 @@ function problemaDoDestino(destino, origem) {
   return null;
 }
 
-// Onde cada evento planejado fica no mapa. Na ida, o km conta a partir da filial;
-// na volta, a partir do destino, no caminho de volta à filial.
-// Ida e volta usam a mesma linha, então cada marcador é empurrado um pouco para a
+// Onde cada evento planejado fica no mapa: o km é contado ao longo do percurso inteiro
+// (filial → ... → filial), trecho por trecho.
+// Ida e volta podem usar a mesma linha, então cada marcador é empurrado um pouco para a
 // DIREITA do sentido do voo: ficam duas "faixas", como uma estrada de mão dupla.
 const AFASTAMENTO_FAIXA_KM = 0.35;
 
-function marcadoresDosEventos(eventos, origem, destino, distanciaIda) {
-  if (distanciaIda === 0) return [];
-  // Direção da ida (tamanho 1) e a direita dela (girada 90°)
-  const ida = { x: (destino.x - origem.x) / distanciaIda, y: (destino.y - origem.y) / distanciaIda };
-  const direitaDaIda = { x: -ida.y, y: ida.x };
-
+function marcadoresDosEventos(eventos, paradas) {
   return eventos
     .map((evento, indice) => {
-      if (evento.km > distanciaIda * 2) return null; // fora da rota
-      const naIda = evento.km <= distanciaIda;
-      const ponto = naIda
-        ? posicaoNaRota(origem, destino, evento.km)
-        : posicaoNaRota(destino, origem, evento.km - distanciaIda);
-      const lado = naIda ? 1 : -1; // na volta, a direita do drone é o outro lado da linha
-      return {
-        x: ponto.x + direitaDaIda.x * AFASTAMENTO_FAIXA_KM * lado,
-        y: ponto.y + direitaDaIda.y * AFASTAMENTO_FAIXA_KM * lado,
-        cor: tipoDoEvento(evento.tipo).cor,
-        numero: indice + 1,
-      };
+      // Procura em qual trecho o km cai
+      let resto = evento.km;
+      for (let i = 1; i < paradas.length; i++) {
+        const de = paradas[i - 1];
+        const para = paradas[i];
+        const tamanho = distanciaKm(de, para);
+        if (resto <= tamanho + 0.001 && tamanho > 0) {
+          const ponto = posicaoNaRota(de, para, resto);
+          // A direita do sentido do voo neste trecho (a direção girada 90°)
+          const direita = { x: -(para.y - de.y) / tamanho, y: (para.x - de.x) / tamanho };
+          return {
+            x: ponto.x + direita.x * AFASTAMENTO_FAIXA_KM,
+            y: ponto.y + direita.y * AFASTAMENTO_FAIXA_KM,
+            cor: tipoDoEvento(evento.tipo).cor,
+            numero: indice + 1,
+          };
+        }
+        resto -= tamanho;
+      }
+      return null; // fora da rota
     })
     .filter((marcador) => marcador !== null);
 }
 
 // Um voo novo, parado na filial, pronto para decolar, com as escolhas do usuário
 function criarVoo(configuracao) {
+  const [filial] = percursoDa(configuracao);
   return {
-    origem: filialDaMissao(configuracao.destino),
+    origem: filial,
     destino: configuracao.destino,
+    // Missão de órgãos: o voo passa antes pelo hospital da coleta (veja voo.js)
+    coleta: ehMissaoOrgao(configuracao) ? configuracao.coleta : undefined,
     km: 0,
     altitude: 0,
     bateria: configuracao.bateria,
@@ -165,7 +215,7 @@ export default function Simular() {
 
   // Onde o mapa está olhando na montagem: null = a cidade inteira;
   // { centro, km } = aproximado numa região (centro em km, tamanho da vista em km)
-  const [foco, setFoco] = useState(() => focoDaRota(CONFIGURACAO_INICIAL.destino));
+  const [foco, setFoco] = useState(() => focoDaRota(CONFIGURACAO_INICIAL));
   const [mostrarAlcance, setMostrarAlcance] = useState(false);
 
   // Muda só um campo da configuração, mantendo os outros (o "..." copia o resto).
@@ -175,17 +225,31 @@ export default function Simular() {
     setCenario(null);
   };
 
-  // Escolheu um destino (pela busca ou por um cenário): o mapa enquadra a rota nova
+  // Escolheu um destino ou um hospital de coleta (pela busca): o mapa enquadra a rota nova
   const escolherDestino = (destino) => {
     mudar('destino', destino);
-    setFoco(focoDaRota(destino));
+    setFoco(focoDaRota({ ...configuracao, destino }));
+  };
+  const escolherColeta = (coleta) => {
+    mudar('coleta', coleta);
+    setFoco(focoDaRota({ ...configuracao, coleta }));
+  };
+
+  // Trocou o tipo de entrega. Ao escolher "Órgãos" pela primeira vez, já sugere um
+  // hospital de coleta (dá para trocar logo abaixo).
+  const escolherTipo = (prioridade) => {
+    const coleta =
+      prioridade === 'orgaos' ? configuracao.coleta || coletaSugerida(configuracao.destino) : configuracao.coleta;
+    setConfiguracao((atual) => ({ ...atual, prioridade, coleta }));
+    setCenario(null);
+    setFoco(focoDaRota({ ...configuracao, prioridade, coleta }));
   };
 
   const carregarCenario = (escolhido) => {
     const nova = configuracaoDoCenario(escolhido);
     setConfiguracao(nova);
     setCenario(escolhido.id);
-    setFoco(focoDaRota(nova.destino));
+    setFoco(focoDaRota(nova));
   };
 
   // Toque no mapa, em dois passos:
@@ -204,7 +268,9 @@ export default function Simular() {
     mudar('destino', escolhido || { id: 'ponto-livre', nome: 'Ponto no mapa', rotulo: 'Ponto no mapa', ...ponto });
   };
 
-  const origem = filialDaMissao(configuracao.destino);
+  const orgao = ehMissaoOrgao(configuracao);
+  const paradas = percursoDa(configuracao);
+  const origem = paradas[0];
 
   // Os pontos de entrega têm gente: numa emergência, o drone evita descer perto deles.
   // Se o destino for um ponto livre do mapa, ele também entra nessa lista.
@@ -215,8 +281,11 @@ export default function Simular() {
     vias: VIAS,
     locais: destinoLivre ? [...HOSPITAIS_DO_MAPA, configuracao.destino] : HOSPITAIS_DO_MAPA,
   };
-  const distanciaIda = distanciaKm(origem, configuracao.destino);
-  const eventos = eventosParaOVoo(configuracao.eventos, distanciaIda);
+  // Ida = da filial até a entrega (passando pela coleta, nos órgãos); volta = o último trecho
+  const distanciaIda = tamanhoDe(paradas.slice(0, -1));
+  const distanciaVolta = distanciaKm(paradas[paradas.length - 2], paradas[paradas.length - 1]);
+  const kmColeta = orgao ? distanciaKm(origem, configuracao.coleta) : undefined;
+  const eventos = eventosParaOVoo(configuracao.eventos, distanciaIda + distanciaVolta);
 
   // Enquanto o drone está no ar, um "relógio" avança o voo a cada PASSO_MS
   useEffect(() => {
@@ -259,8 +328,8 @@ export default function Simular() {
   const paraquedas = voo && voo.paraquedasAberto ? { alcance: voo.alcance, confortavel: voo.confortavel } : null;
 
   // Verificações antes de decolar
-  const problemaDestino = problemaDoDestino(configuracao.destino, origem);
-  const decolagem = verificarDecolagem(origem, configuracao.destino, configuracao.bateria);
+  const problemaDestino = problemaDoDestino(configuracao, origem);
+  const decolagem = verificarPercurso(paradas, configuracao.bateria);
   const precisa = Math.ceil(decolagem.necessariaComMargem);
   const podeIniciar = !problemaDestino && decolagem.pode;
 
@@ -272,6 +341,7 @@ export default function Simular() {
 
       <View style={styles.areaMapa}>
         <Mapa
+          coleta={orgao ? configuracao.coleta : undefined}
           destino={configuracao.destino}
           origem={voo ? voo.hub || voo.origem : origem}
           centro={voo === null && foco ? foco.centro : undefined}
@@ -284,7 +354,7 @@ export default function Simular() {
           incerteza={voo ? incertezaDoVoo(voo) : 0}
           obstaculos={voo ? (voo.obstaculos || []).map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo)) : []}
           vista={vista}
-          marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, origem, configuracao.destino, distanciaIda) : []}
+          marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, paradas) : []}
           aoTocar={voo === null ? tocarNoMapa : undefined}
         />
       </View>
@@ -317,7 +387,14 @@ export default function Simular() {
             <CenariosProntos escolhido={cenario} aoEscolher={carregarCenario} />
           </Secao>
 
-          <Secao titulo="Destino" dica={`Sai da ${origem.nome}, a filial mais próxima · ${km1(distanciaIda)} km (ida)`}>
+          <Secao
+            titulo={orgao ? 'Hospital da entrega' : 'Destino'}
+            dica={
+              orgao
+                ? `Sai da ${origem.nome}, a filial mais próxima da coleta · ${km1(distanciaIda)} km até a entrega`
+                : `Sai da ${origem.nome}, a filial mais próxima · ${km1(distanciaIda)} km (ida)`
+            }
+          >
             <View style={styles.destinoAtual}>
               <Text style={styles.destinoNome}>{configuracao.destino.nome}</Text>
               {configuracao.destino.bairro ? <Text style={styles.destinoBairro}>{configuracao.destino.bairro}</Text> : null}
@@ -327,10 +404,23 @@ export default function Simular() {
           </Secao>
 
           <Secao titulo="Tipo de entrega" dica="Define a prioridade do drone no tráfego aéreo">
-            <Opcoes opcoes={MISSOES} valor={configuracao.prioridade} aoEscolher={(valor) => mudar('prioridade', valor)} />
+            <Opcoes opcoes={MISSOES} valor={configuracao.prioridade} aoEscolher={escolherTipo} />
           </Secao>
 
-          <Secao titulo="Bateria na decolagem" dica={`Esta rota precisa de ${precisa}% (ida + volta + 30% de margem)`}>
+          {orgao ? (
+            <Secao titulo="Hospital da coleta" dica="Onde o órgão é retirado: o drone pousa ali antes de seguir para a entrega">
+              <View style={styles.destinoAtual}>
+                <Text style={styles.destinoNome}>{configuracao.coleta.nome}</Text>
+                {configuracao.coleta.bairro ? <Text style={styles.destinoBairro}>{configuracao.coleta.bairro}</Text> : null}
+              </View>
+              <BuscaDestino locais={HOSPITAIS_DO_MAPA} aoEscolher={escolherColeta} />
+            </Secao>
+          ) : null}
+
+          <Secao
+            titulo="Bateria na decolagem"
+            dica={`Esta rota precisa de ${precisa}% (${orgao ? 'coleta + entrega + volta' : 'ida + volta'} + 30% de margem)`}
+          >
             <View style={styles.linhaBateria}>
               <Contador valor={configuracao.bateria} passo={5} minimo={10} maximo={100} sufixo="%" aoMudar={(valor) => mudar('bateria', valor)} />
               <Text style={[styles.selo, decolagem.pode ? styles.seloOk : styles.seloNao]}>
@@ -351,11 +441,17 @@ export default function Simular() {
 
           <Secao
             titulo={`Eventos (${configuracao.eventos.length})`}
-            dica={`Ida: km 0 a ${km1(distanciaIda)} · Volta: até o km ${km1(distanciaIda * 2)}`}
+            dica={
+              orgao
+                ? `Coleta no km ${km1(kmColeta)} · Entrega no km ${km1(distanciaIda)} · Volta: até o km ${km1(distanciaIda + distanciaVolta)}`
+                : `Ida: km 0 a ${km1(distanciaIda)} · Volta: até o km ${km1(distanciaIda + distanciaVolta)}`
+            }
           >
             <EditorEventos
               eventos={configuracao.eventos}
               distanciaIda={distanciaIda}
+              distanciaVolta={distanciaVolta}
+              kmColeta={kmColeta}
               aoMudar={(lista) => mudar('eventos', lista)}
             />
           </Secao>
@@ -379,7 +475,8 @@ export default function Simular() {
           <Text style={[styles.missao, { color: missao.cor }]}>{missao.rotulo}</Text>
           {/* voo.hub guarda a filial de saída (voo.origem muda a cada trecho do voo) */}
           <Text style={styles.trajeto}>
-            {(voo.hub || voo.origem).nome} → {configuracao.destino.rotulo}
+            {(voo.hub || voo.origem).nome} → {orgao ? `${configuracao.coleta.rotulo} → ` : ''}
+            {configuracao.destino.rotulo}
           </Text>
           <Text style={styles.status}>{voo.mensagem}</Text>
           <Text style={styles.bateria}>Bateria: {Math.round(voo.bateria)}%</Text>

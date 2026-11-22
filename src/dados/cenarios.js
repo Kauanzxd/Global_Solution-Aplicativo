@@ -1,9 +1,10 @@
 // Cenários prontos: situações montadas com um toque, para demonstrar as regras do drone.
 // Depois de carregar, dá para mudar qualquer coisa (é só um ponto de partida).
 // "destino" é o id de um hospital (src/dados/hospitais.js). A missão sai da filial mais
-// próxima do destino. Os kms foram calibrados no mapa da cidade inteira: na rota
-// Filial Itaim Bibi → Einstein (Morumbi), por exemplo, o drone cruza a Marginal Pinheiros
-// entre o km 1,9 e o 2,2.
+// próxima do destino. "coleta" (só na missão de órgãos) é o hospital onde o órgão é
+// retirado: aí a missão sai da filial mais próxima da coleta.
+// Os kms foram calibrados no mapa da cidade inteira: na rota Filial Itaim Bibi → Einstein
+// (Morumbi), por exemplo, o drone cruza a Marginal Pinheiros entre o km 1,9 e o 2,2.
 export const CENARIOS = [
   {
     id: 'tranquila',
@@ -56,10 +57,11 @@ export const CENARIOS = [
   {
     id: 'orgao-transito',
     titulo: 'Órgão no tráfego aéreo',
-    descricao: 'Levando um órgão ao HC, cruza um drone comercial (ele cede) e um sem rádio (nós desviamos).',
-    destino: 'h065', // Hospital das Clínicas da FMUSP, Cerqueira César (Filial Centro)
+    descricao: 'Coleta um órgão no São Camilo Pompeia e leva ao HC; no caminho, um drone comercial cede e um sem rádio nos faz desviar.',
+    coleta: 'h146', // Hospital São Camilo Pompeia: onde o órgão é retirado (sai da Filial Santana)
+    destino: 'h065', // Hospital das Clínicas da FMUSP, Cerqueira César (volta para a Filial Centro)
     prioridade: 'orgaos',
-    bateria: 60,
+    bateria: 70,
     eventos: [
       { tipo: 'drone', km: 1.0, comunicacao: true, prioridade: 'comercial', comportamento: 'reto' },
       { tipo: 'drone', km: 2.5, comunicacao: false, prioridade: 'comercial', comportamento: 'errante' },

@@ -408,8 +408,10 @@ function MarcadorEvento({ marcador, s }) {
 // "vista" (opcional): tamanho do pedaço do mapa na tela (100 = inteiro), centrado no drone
 // "aoTocar" (opcional): função chamada com o ponto { x, y } em km onde o usuário tocou
 // "marcadores" (opcional): eventos planejados [{ x, y, cor, numero }], desenhados na rota
+// "coleta" (opcional): missão de órgãos, o hospital onde o órgão é retirado (a rota passa por ele)
 export default function Mapa({
   marcadores = [],
+  coleta,
   destino,
   origem,
   centro,
@@ -450,8 +452,10 @@ export default function Mapa({
 
   // Locais na vista, do MENOS para o MAIS importante, porque no SVG o que vem por último fica
   // por cima: hospitais, depois filiais, e a origem e o destino da rota no topo.
+  const daRota = (local) =>
+    local.id === partida.id || (destino && local.id === destino.id) || (coleta && local.id === coleta.id);
   const importancia = (local) => {
-    if (local.id === partida.id || (destino && local.id === destino.id)) return 2;
+    if (daRota(local)) return 2;
     return local.tipo === 'hub' ? 1 : 0;
   };
   const visiveis = LOCAIS.filter(naVista).sort((a, b) => importancia(a) - importancia(b));
@@ -590,18 +594,24 @@ export default function Mapa({
           <ZonaPouso key={zona.id} zona={zona} s={s} detalhe={detalhe} />
         ))}
 
-        {/* 10. Rota: linha tracejada da filial até o destino (só se houver destino) */}
-        {destino && (
-          <Line
-            x1={partida.x * ESCALA}
-            y1={partida.y * ESCALA}
-            x2={destino.x * ESCALA}
-            y2={destino.y * ESCALA}
-            stroke="#0B5CAD"
-            strokeWidth={0.7 * s}
-            strokeDasharray={tracejado([2, 1.5], s)}
-          />
-        )}
+        {/* 10. Rota: linha tracejada da filial até o destino (só se houver destino).
+            Na missão de órgãos, passa antes pelo hospital da coleta. */}
+        {destino &&
+          (coleta ? [partida, coleta, destino] : [partida, destino]).slice(1).map((ponto, indice, trechos) => {
+            const de = indice === 0 ? partida : trechos[indice - 1];
+            return (
+              <Line
+                key={indice}
+                x1={de.x * ESCALA}
+                y1={de.y * ESCALA}
+                x2={ponto.x * ESCALA}
+                y2={ponto.y * ESCALA}
+                stroke="#0B5CAD"
+                strokeWidth={0.7 * s}
+                strokeDasharray={tracejado([2, 1.5], s)}
+              />
+            );
+          })}
 
         {/* Alcance do paraquedas: círculo de fora = até onde ele consegue planar;
             círculo de dentro = até onde ele chega com margem para um pouso suave */}
@@ -649,12 +659,9 @@ export default function Mapa({
 
         {/* 11. Locais: por cima do mapa e da rota. A origem e o destino sempre aparecem
             com detalhe (letra e nome), mesmo com a cidade inteira na tela */}
-        {visiveis.map((local) => {
-          const daRota = local.id === partida.id || (destino && local.id === destino.id);
-          return (
-            <Local key={local.id} local={local} s={s} detalhe={detalhe || daRota} comRotulo={rotulados.has(local.id)} />
-          );
-        })}
+        {visiveis.map((local) => (
+          <Local key={local.id} local={local} s={s} detalhe={detalhe || daRota(local)} comRotulo={rotulados.has(local.id)} />
+        ))}
 
         {/* Destino livre (escolhido tocando no mapa) */}
         {destinoLivre && <MarcadorDestino destino={destino} s={s} />}

@@ -10,7 +10,8 @@ let proximoId = 1;
 
 // A lista de eventos da simulação: os cartões + o botão de adicionar.
 // eventos: a lista atual | aoMudar(novaLista): devolve a lista nova para a tela
-export default function EditorEventos({ eventos, distanciaIda, aoMudar }) {
+// distanciaVolta e kmColeta são opcionais (missão de órgãos): veja a LinhaDoTempo
+export default function EditorEventos({ eventos, distanciaIda, distanciaVolta = distanciaIda, kmColeta, aoMudar }) {
   const [escolhendo, setEscolhendo] = useState(false); // aberta a grade de tipos?
 
   // Adiciona um evento do tipo escolhido, no meio da ida, com os valores iniciais dele
@@ -29,7 +30,7 @@ export default function EditorEventos({ eventos, distanciaIda, aoMudar }) {
 
   return (
     <View>
-      <LinhaDoTempo eventos={eventos} distanciaIda={distanciaIda} />
+      <LinhaDoTempo eventos={eventos} distanciaIda={distanciaIda} distanciaVolta={distanciaVolta} kmColeta={kmColeta} />
 
       {eventos.length === 0 ? (
         <Text style={styles.vazio}>Nenhum evento: o drone faz a missão sem imprevistos.</Text>
@@ -41,6 +42,8 @@ export default function EditorEventos({ eventos, distanciaIda, aoMudar }) {
           evento={evento}
           numero={indice + 1}
           distanciaIda={distanciaIda}
+          distanciaVolta={distanciaVolta}
+          kmColeta={kmColeta}
           aoMudar={(campo, valor) => mudarEvento(evento.id, campo, valor)}
           aoRemover={() => remover(evento.id)}
         />

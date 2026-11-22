@@ -2,17 +2,22 @@ import { StyleSheet, Text, View } from 'react-native';
 import { tipoDoEvento } from '../dados/tiposEventos';
 import { TEMA } from './tema';
 
-// A missão inteira numa barra: metade esquerda = ida (filial → destino),
-// metade direita = volta (destino → filial). Cada evento vira uma bolinha numerada
-// no ponto da barra em que acontece.
-export default function LinhaDoTempo({ eventos, distanciaIda }) {
-  const total = distanciaIda * 2; // ida + volta
+// A missão inteira numa barra: parte esquerda = ida (filial → destino),
+// parte direita = volta (destino → filial), cada uma do tamanho do seu trecho.
+// Cada evento vira uma bolinha numerada no ponto da barra em que acontece.
+// "distanciaVolta" (opcional): sem ele, a volta tem o mesmo tamanho da ida.
+// "kmColeta" (opcional): missão de órgãos, ganha uma marca no ponto da coleta.
+export default function LinhaDoTempo({ eventos, distanciaIda, distanciaVolta = distanciaIda, kmColeta }) {
+  const total = distanciaIda + distanciaVolta; // ida + volta
+  const km = (valor) => valor.toFixed(1).replace('.', ',');
 
   return (
     <View style={styles.caixa}>
       <View style={styles.barra}>
-        <View style={[styles.metade, { backgroundColor: TEMA.marcaClara }]} />
-        <View style={[styles.metade, { backgroundColor: '#E0F2F1' }]} />
+        <View style={[styles.metade, { flex: distanciaIda, backgroundColor: TEMA.marcaClara }]} />
+        <View style={[styles.metade, { flex: distanciaVolta, backgroundColor: '#E0F2F1' }]} />
+        {/* Marca da coleta do órgão: um tracinho escuro no ponto em que o drone pousa no hospital X */}
+        {kmColeta ? <View style={[styles.marcaColeta, { left: `${(kmColeta / total) * 100}%` }]} /> : null}
 
         {/* Bolinhas dos eventos: a posição é a fração do caminho (km ÷ total) */}
         {eventos.map((evento, indice) => {
@@ -32,7 +37,8 @@ export default function LinhaDoTempo({ eventos, distanciaIda }) {
       {/* Legenda embaixo da barra: onde a missão começa, onde entrega e onde termina */}
       <View style={styles.legenda}>
         <Text style={styles.ponto}>Filial</Text>
-        <Text style={styles.ponto}>Entrega · km {distanciaIda.toFixed(1).replace('.', ',')}</Text>
+        {kmColeta ? <Text style={styles.ponto}>Coleta · km {km(kmColeta)}</Text> : null}
+        <Text style={styles.ponto}>Entrega · km {km(distanciaIda)}</Text>
         <Text style={styles.ponto}>Filial</Text>
       </View>
       <View style={styles.legenda}>
@@ -55,8 +61,17 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   metade: {
-    flex: 1, // cada metade ocupa a mesma largura
+    flex: 1, // a largura de verdade vem do tamanho do trecho (flex passado no componente)
     height: 10,
+  },
+  marcaColeta: {
+    position: 'absolute',
+    top: -4,
+    width: 3,
+    height: 18,
+    marginLeft: -1.5,
+    borderRadius: 2,
+    backgroundColor: TEMA.texto,
   },
   bolinha: {
     position: 'absolute',

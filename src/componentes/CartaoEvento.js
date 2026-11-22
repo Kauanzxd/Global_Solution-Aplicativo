@@ -13,11 +13,13 @@ import Contador from './Contador';
 import Opcoes from './Opcoes';
 import { TEMA } from './tema';
 
-// Em que parte da missão o km cai: decolagem (km 0), ida, volta ou fora da rota
-function etapaDoKm(km, distanciaIda) {
+// Em que parte da missão o km cai: decolagem (km 0), ida, volta ou fora da rota.
+// Na missão de órgãos, a ida tem duas partes: até a coleta e da coleta até a entrega.
+function etapaDoKm(km, distanciaIda, distanciaVolta, kmColeta) {
   if (km === 0) return { texto: 'Na decolagem', cor: TEMA.textoSuave };
-  if (km <= distanciaIda) return { texto: 'Ida', cor: TEMA.marca };
-  if (km <= distanciaIda * 2) return { texto: 'Volta', cor: '#00897B' };
+  if (kmColeta && km <= kmColeta) return { texto: 'Até a coleta', cor: TEMA.marca };
+  if (km <= distanciaIda) return { texto: kmColeta ? 'Com o órgão' : 'Ida', cor: TEMA.marca };
+  if (km <= distanciaIda + distanciaVolta) return { texto: 'Volta', cor: '#00897B' };
   return { texto: 'Fora da rota', cor: TEMA.perigo };
 }
 
@@ -34,10 +36,12 @@ function Linha({ rotulo, children }) {
 // O cartão de UM evento: cabeçalho (nome, etapa, remover), km e as opções do tipo.
 // "aoMudar(campo, valor)" muda um campo do evento; "aoRemover()" tira o evento da lista.
 // "numero": a posição do evento na lista (1, 2, 3...), o mesmo número que aparece no mapa
-export default function CartaoEvento({ evento, numero, distanciaIda, aoMudar, aoRemover }) {
+// "distanciaVolta" (opcional): tamanho da volta; sem ele, a volta é igual à ida
+// "kmColeta" (opcional): missão de órgãos, km em que o drone pousa para coletar o órgão
+export default function CartaoEvento({ evento, numero, distanciaIda, distanciaVolta = distanciaIda, kmColeta, aoMudar, aoRemover }) {
   const tipo = tipoDoEvento(evento.tipo);
-  const etapa = etapaDoKm(evento.km, distanciaIda);
-  const kmMaximo = Number((distanciaIda * 2).toFixed(1)); // ida + volta
+  const etapa = etapaDoKm(evento.km, distanciaIda, distanciaVolta, kmColeta);
+  const kmMaximo = Number((distanciaIda + distanciaVolta).toFixed(1)); // ida + volta
 
   return (
     <View style={[styles.cartao, { borderLeftColor: tipo.cor }]}>
