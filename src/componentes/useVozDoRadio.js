@@ -1,6 +1,7 @@
 import * as Speech from 'expo-speech';
 import { useEffect, useRef, useState } from 'react';
-import { bipDeFim, chiadoDeAbertura } from './somDeRadio';
+import { Platform } from 'react-native';
+import { bipDeFim, chiadoDeAbertura, decodificarAudio, tocarComoRadio } from './somDeRadio';
 
 // Voz do rádio: lê em voz alta as mensagens dos drones (expo-speech, a voz do próprio
 // celular ou navegador). As mensagens entram numa fila e são lidas uma de cada vez.
@@ -21,6 +22,23 @@ const TONS = [1.0, 0.92, 1.08, 0.96, 1.04];
 const NATURAL = /natural|online|neural|google|enhanced|premium/i;
 function naturalidade(voz) {
   return (NATURAL.test(voz.name || '') ? 2 : 0) + (voz.quality === 'Enhanced' ? 1 : 0);
+}
+
+// Voz da nuvem (Azure, pela rota /api/voz): vozes neurais, bem mais humanas. Só na versão
+// web (é a que vai para a apresentação). Se a nuvem demorar ou falhar, usa a voz do aparelho.
+const USAR_NUVEM = Platform.OS === 'web';
+const ESPERA_MAXIMA_NUVEM_MS = 1500; // mais que isso, fala com a voz do aparelho
+const PAUSA_APOS_FALHA_MS = 30000; // depois de uma falha, 30 s sem tentar a nuvem
+// A Central fala com a primeira; cada drone com uma das outras, em rodízio
+const VOZES_NUVEM = ['pt-BR-FranciscaNeural', 'pt-BR-AntonioNeural', 'pt-BR-ThalitaNeural', 'pt-BR-DonatoNeural', 'pt-BR-BrendaNeural', 'pt-BR-FabioNeural', 'pt-BR-GiovannaNeural'];
+function vozDaNuvem(nome) {
+  const numero = numeroDoDrone(nome);
+  return numero === 0 ? VOZES_NUVEM[0] : VOZES_NUVEM[1 + ((numero - 1) % (VOZES_NUVEM.length - 1))];
+}
+
+// Promessa que desiste depois de "ms" milissegundos (responde null)
+function comLimite(promessa, ms) {
+  return Promise.race([promessa, new Promise((responder) => setTimeout(() => responder(null), ms))]);
 }
 
 // Número de um nome de rádio: "SADEC-12" → 12; a Central (sem número) → 0
@@ -71,11 +89,36 @@ export default function useVozDoRadio() {
   const ligadaRef = useRef(ligada);
   ligadaRef.current = ligada;
 
-  const fila = useRef([]); // [{ texto, evento }]
+  const fila = useRef([]); // [{ nome, falado, audio, evento, parte }]
   const atual = useRef(null); // a fala que está tocando agora
   const seguranca = useRef(null); // timer que destrava a fila se o onDone não vier
   const contador = useRef(0); // número de cada fala (para saber qual terminou)
   const vozes = useRef([]); // as vozes em português do aparelho
+  const audiosProntos = useRef(new Map()); // memória: "voz|texto" → áudio já baixado da nuvem
+  const nuvemPausadaAte = useRef(0); // depois de uma falha, a nuvem descansa um pouco
+  const cortarAudio = useRef(null); // corta o áudio da nuvem que está tocando
+
+  // Baixa (ou pega da memória) o áudio de uma fala na voz da nuvem; null se não der
+  const buscarAudio = (texto, voz) => {
+    if (!USAR_NUVEM || Date.now() < nuvemPausadaAte.current) return null;
+    const chave = `${voz}|${texto}`;
+    if (!audiosProntos.current.has(chave)) {
+      const pedido = fetch('/api/voz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto, voz }),
+      })
+        .then((resposta) => (resposta.ok ? resposta.arrayBuffer() : Promise.reject(new Error(String(resposta.status)))))
+        .then(decodificarAudio)
+        .catch(() => {
+          audiosProntos.current.delete(chave); // não guarda a falha na memória
+          nuvemPausadaAte.current = Date.now() + PAUSA_APOS_FALHA_MS;
+          return null;
+        });
+      audiosProntos.current.set(chave, pedido);
+    }
+    return audiosProntos.current.get(chave);
+  };
 
   // Busca as vozes do aparelho uma vez (no navegador elas podem demorar a carregar)
   useEffect(() => {
@@ -98,11 +141,12 @@ export default function useVozDoRadio() {
   };
 
   // Toca a próxima da fila (se não houver nada tocando)
-  const proxima = () => {
+  const proxima = async () => {
     clearTimeout(seguranca.current);
+    cortarAudio.current = null;
     atual.current = fila.current.shift() || null;
     if (!atual.current) return;
-    const falado = textoParaFala(atual.current.texto);
+    const falado = atual.current.falado;
     const numero = ++contador.current;
     atual.current.numero = numero;
     // Só passa para a próxima se quem terminou for a fala atual (o aviso da voz e o timer
@@ -114,6 +158,17 @@ export default function useVozDoRadio() {
       }
     };
     if (!['meio', 'fim'].includes(atual.current.parte)) chiadoDeAbertura(); // o rádio abre
+
+    // 1. Voz da nuvem (já começou a baixar quando a fala entrou na fila)
+    const buffer = atual.current.audio ? await comLimite(atual.current.audio, ESPERA_MAXIMA_NUVEM_MS) : null;
+    if (!atual.current || atual.current.numero !== numero) return; // pararam a voz enquanto esperava
+    if (buffer) {
+      cortarAudio.current = tocarComoRadio(buffer, terminou);
+      seguranca.current = setTimeout(terminou, buffer.duration * 1000 + 1000);
+      return;
+    }
+    // 2. Reserva: a voz do aparelho
+    if (atual.current.audio) nuvemPausadaAte.current = Date.now() + PAUSA_APOS_FALHA_MS; // demorou demais
     Speech.speak(falado, { ...jeitoDeFalar(atual.current.nome), onDone: terminou, onError: terminou });
     seguranca.current = setTimeout(terminou, duracaoEstimadaMs(falado));
   };
@@ -125,7 +180,12 @@ export default function useVozDoRadio() {
     // checadas (as linhas do meio) fica só na tela
     mensagens
       .filter((mensagem) => mensagem.parte !== 'meio')
-      .forEach((mensagem) => fila.current.push({ nome: mensagem.nome, texto: fraseDeRadio(mensagem), evento: mensagem.evento, parte: mensagem.parte }));
+      .forEach((mensagem) => {
+        const falado = textoParaFala(fraseDeRadio(mensagem));
+        // o áudio da nuvem começa a baixar já, para estar pronto quando chegar a vez
+        const audio = buscarAudio(falado, vozDaNuvem(mensagem.nome));
+        fila.current.push({ nome: mensagem.nome, falado, audio, evento: mensagem.evento, parte: mensagem.parte });
+      });
     // Fila cheia: descarta primeiro as falas de rotina mais antigas, depois as mais antigas
     while (fila.current.length > FILA_MAXIMA) {
       const rotina = fila.current.findIndex((item) => !item.evento && !item.parte);
@@ -139,6 +199,8 @@ export default function useVozDoRadio() {
     clearTimeout(seguranca.current);
     fila.current = [];
     atual.current = null;
+    if (cortarAudio.current) cortarAudio.current();
+    cortarAudio.current = null;
     Speech.stop();
   };
 

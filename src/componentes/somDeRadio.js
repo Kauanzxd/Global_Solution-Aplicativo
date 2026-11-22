@@ -54,3 +54,35 @@ export function bipDeFim() {
   tom.start();
   tom.stop(ctx.currentTime + 0.12);
 }
+
+// ---------- Voz da nuvem ----------
+// O áudio (MP3) que vem da rota /api/voz vira um "buffer" que a Web Audio sabe tocar.
+// Sem Web Audio (app nativo), dá erro e quem chamou usa a voz do aparelho.
+export function decodificarAudio(bytes) {
+  const ctx = audio();
+  if (!ctx) return Promise.reject(new Error('Sem Web Audio'));
+  return ctx.decodeAudioData(bytes);
+}
+
+// Toca a voz com filtro de rádio: só a faixa de 300 a 3400 Hz (a faixa do rádio de voz),
+// o que deixa o som "de rádio" de aviação. "aoTerminar" é chamado no fim da fala.
+// Devolve uma função que corta a fala (para o botão de interromper).
+export function tocarComoRadio(buffer, aoTerminar) {
+  const ctx = audio();
+  if (!ctx) return () => {};
+  const fonte = ctx.createBufferSource();
+  fonte.buffer = buffer;
+  const graves = ctx.createBiquadFilter(); // corta os graves
+  graves.type = 'highpass';
+  graves.frequency.value = 300;
+  const agudos = ctx.createBiquadFilter(); // corta os agudos
+  agudos.type = 'lowpass';
+  agudos.frequency.value = 3400;
+  fonte.connect(graves).connect(agudos).connect(ctx.destination);
+  fonte.onended = aoTerminar;
+  fonte.start();
+  return () => {
+    fonte.onended = null;
+    fonte.stop();
+  };
+}
