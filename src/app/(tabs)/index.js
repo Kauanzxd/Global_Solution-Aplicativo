@@ -579,8 +579,8 @@ export default function Simular() {
         />
       </View>
 
-      {/* Durante o voo: o rádio logo abaixo do mapa (numa operação, mostra mais mensagens) */}
-      {voo !== null ? <LogDoRadio mensagens={radio} quantas={configuracao.operacao ? 3 : 2} /> : null}
+      {/* Durante o voo: o rádio logo abaixo do mapa, com as 3 últimas mensagens (em qualquer simulação) */}
+      {voo !== null ? <LogDoRadio mensagens={radio} quantas={3} /> : null}
 
       {/* Velocidade da simulação: dá para mudar no meio do voo */}
       {voo !== null ? (

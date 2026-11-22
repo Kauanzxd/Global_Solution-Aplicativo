@@ -1327,10 +1327,12 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
 
   // Desviador em tempo real (com motor fraco ou de paraquedas não há potência para manobrar)
   const podeManobrar = voo.situacao !== 'planando' && voo.situacao !== 'motor-fraco';
-  if (podeManobrar && voo.obstaculos && voo.obstaculos.length > 0) {
+  // (desviando e sem obstáculos, porque o outro drone saiu da bolha de altura: entra para encerrar o desvio)
+  const temObstaculos = (voo.obstaculos && voo.obstaculos.length > 0) || voo.desviandoObstaculo;
+  if (podeManobrar && temObstaculos) {
     // Outro drone da rede ao alcance do rádio e ainda sem acordo? Conversa primeiro.
     const local = posicaoAtual(voo);
-    const semAcordo = voo.obstaculos.find(
+    const semAcordo = (voo.obstaculos || []).find(
       (o) =>
         o.tipo === 'drone' &&
         o.comunicacao &&
@@ -1340,7 +1342,7 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
     if (semAcordo) return negociar(voo, semAcordo);
 
     // Drone sem rádio que os sensores acabaram de enxergar
-    const semRadio = voo.obstaculos.find(
+    const semRadio = (voo.obstaculos || []).find(
       (o) =>
         o.tipo === 'drone' &&
         !o.comunicacao &&

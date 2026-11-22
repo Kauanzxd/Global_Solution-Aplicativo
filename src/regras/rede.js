@@ -6,7 +6,11 @@
 import { verificarDecolagem } from './bateria.js';
 import { distanciaKm } from './distancia.js';
 import { ANTECEDENCIA_KM } from './obstaculos.js';
-import { avancarVoo, avistarDrone, estaNoAr, posicaoNaRota } from './voo.js';
+import { altitudeDoVoo, avancarVoo, avistarDrone, estaNoAr, posicaoNaRota } from './voo.js';
+
+// Bolha de altura: com mais de 30 m de diferença na vertical, dois drones não se cruzam
+// (um descendo para entregar e outro a 120 m, por exemplo). Ninguém precisa desviar.
+const BOLHA_VERTICAL_M = 30;
 
 // As missões dos drones extras, na ordem em que entram (cada um com uma cor no mapa)
 export const DRONES_DA_REDE = [
@@ -120,17 +124,44 @@ function posicao(voo) {
   return posicaoNaRota(voo.origem, voo.destino, voo.km);
 }
 
-// Drones perto um do outro (até 800 m, quando o obstáculo "entra em cena") se enxergam.
+// Saiu da bolha de altura: o outro drone deixa de ser obstáculo para este voo (se estava
+// desviando dele, o desvio termina no próximo passo). Sai também da lista de "vistos":
+// se os dois voltarem à mesma altura, eles se enxergam de novo.
+function esquecerDrone(voo, idOutro, altitudeOutro) {
+  const tinha = (voo.obstaculos || []).some((o) => o.tipo === 'drone' && o.id === idOutro);
+  if (!tinha) return voo;
+  const minha = altitudeDoVoo(voo);
+  const situacaoOutro = altitudeOutro < minha ? 'abaixo' : 'acima';
+  return {
+    ...voo,
+    obstaculos: voo.obstaculos.filter((o) => !(o.tipo === 'drone' && o.id === idOutro)),
+    dronesVistos: (voo.dronesVistos || []).filter((id) => id !== idOutro),
+    mensagem: `${idOutro} está ${situacaoOutro}, a ${altitudeOutro} m (nós a ${minha} m): fora da bolha de altura, sem risco de colisão`,
+  };
+}
+
+// Drones perto um do outro (até 800 m, quando o obstáculo "entra em cena") se enxergam,
+// desde que estejam quase na mesma altura (bolha de altura).
 // "todos": o principal e os extras. Cada par entra uma vez em cada um (avistarDrone cuida disso).
 export function aproximarDrones(todos) {
   const prontos = todos.map((voo) => voo);
+  const nome = (voo) => voo.idDrone ?? 'SADEC-01';
   for (let i = 0; i < prontos.length; i++) {
     for (let j = i + 1; j < prontos.length; j++) {
       const a = prontos[i];
       const b = prontos[j];
       const noAr = estaNoAr(a) && estaNoAr(b) && !(a.espera > 0) && !(b.espera > 0);
       if (!noAr || distanciaKm(posicao(a), posicao(b)) > ANTECEDENCIA_KM) continue;
-      const comoOutro = (voo) => ({ id: voo.idDrone ?? 'SADEC-01', prioridade: voo.prioridade ?? 'saude', bateria: voo.bateria });
+
+      // Muito acima ou abaixo: não é ameaça (e um desvio que já tinha começado é cancelado)
+      const altitudeA = altitudeDoVoo(a);
+      const altitudeB = altitudeDoVoo(b);
+      if (Math.abs(altitudeA - altitudeB) > BOLHA_VERTICAL_M) {
+        prontos[i] = esquecerDrone(a, nome(b), altitudeB);
+        prontos[j] = esquecerDrone(b, nome(a), altitudeA);
+        continue;
+      }
+      const comoOutro = (voo) => ({ id: nome(voo), prioridade: voo.prioridade ?? 'saude', bateria: voo.bateria });
       prontos[i] = avistarDrone(a, comoOutro(b));
       prontos[j] = avistarDrone(b, comoOutro(a));
     }
