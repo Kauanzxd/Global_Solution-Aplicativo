@@ -145,6 +145,9 @@ const semNumeros = (texto) => (texto || '').replace(/[\d.,]+/g, '#');
 // Câmera lenta: quando um drone reage a um evento (pane, GPS, outro drone, vento...), a
 // simulação fica bem mais lenta por alguns segundos, para dar tempo de ver a reação.
 const VELOCIDADE_CAMERA_LENTA = 0.1;
+// Com a voz ligada e 2 ou mais mensagens esperando para serem faladas, a simulação quase
+// para, até a voz alcançar: assim o que a voz conta é o que está acontecendo no mapa
+const VELOCIDADE_ESPERANDO_RADIO = 0.03;
 const DURACAO_CAMERA_LENTA_MS = 3500;
 // Mensagens de rotina (decolar, voar, entregar, voltar) não são eventos: não ligam a câmera lenta
 const ROTINA = /^(Decolando|Voando|Voltando para|Aguardando|Sobre |Pousou no ponto|Entrega feita!|Missão concluída|Desviando pela direita|Desvio concluído)|coletad[oa]! Decolando/;
@@ -283,13 +286,16 @@ export default function Simular() {
   // Até que horas (Date.now) a câmera lenta vale; o estado só serve para mostrar o aviso
   const cameraLentaAte = useRef(0);
 
-  // Voz do rádio: lê as mensagens em voz alta (pode ser desligada)
-  const voz = useVozDoRadio();
+  // Voz do rádio: lê as mensagens em voz alta (pode ser desligada). Cada mensagem aparece
+  // no rádio escrito quando a voz chega nela, para o texto e a voz andarem juntos.
+  const voz = useVozDoRadio({ aoMostrar: (mensagem) => setRadio((atual) => [...atual, mensagem].slice(-30)) });
 
   // Rolagem da tela: ao iniciar a simulação, a tela sobe até o mapa
   const rolagem = useRef(null);
   const topoDoMapa = useRef(0); // onde o mapa começa dentro da tela (medido pelo onLayout)
-  const [cameraLenta, setCameraLenta] = useState(false);
+  const subirAoMapa = useRef(false); // pedido de subir a tela, feito no botão de iniciar
+  // Aviso no alto do mapa: null (velocidade normal), 'evento' ou 'radio' (esperando a voz)
+  const [cameraLenta, setCameraLenta] = useState(null);
 
   // Pedidos feitos na aba Pedidos: um deles pode chegar aqui para virar o voo
   const { pedidoParaVoar, setPedidoParaVoar, atualizarStatus } = usePedidos();
@@ -300,17 +306,30 @@ export default function Simular() {
     setRadio([]);
     ultimaDoDrone.current = {};
     cameraLentaAte.current = 0;
-    setCameraLenta(false);
+    setCameraLenta(null);
     // A primeira fala sai aqui, no toque do botão: no iPhone e no navegador, a voz só é
     // liberada se começar por um toque do usuário
     voz.parar();
-    voz.falar([{ nome: 'Central SADEC', texto: 'Simulação iniciada', evento: false }]);
-    // Sobe a tela até o mapa (com um respiro abaixo da barra de status do celular)
-    if (rolagem.current) rolagem.current.scrollTo({ y: Math.max(topoDoMapa.current - margens.top - 8, 0), animated: true });
+    voz.falar([{ id: `central-${Date.now()}`, nome: 'Central SADEC', cor: TEMA.marca, texto: 'Simulação iniciada', evento: false }]);
+    // A tela sobe até o mapa logo depois que o painel do voo aparecer (veja o useEffect abaixo)
+    subirAoMapa.current = true;
     setOutros(extrasPlanejados.map(criarVooDaRede));
     setVoo(criarVoo(configuracao));
     if (configuracao.pedido) atualizarStatus(configuracao.pedido.codigo, 'Em voo');
   };
+
+  // Leva a tela direto ao mapa (com um respiro abaixo da barra de status do celular) DEPOIS
+  // que o voo começa, quando a montagem já sumiu. O salto é sem animação: durante o voo a tela
+  // é redesenhada a cada 50 ms, e no navegador isso cancela a rolagem animada no meio do
+  // caminho (era o que acontecia nos pedidos, que têm a montagem bem comprida).
+  const comecouOVoo = voo !== null;
+  useEffect(() => {
+    if (!comecouOVoo || !subirAoMapa.current) return;
+    subirAoMapa.current = false;
+    requestAnimationFrame(() => {
+      if (rolagem.current) rolagem.current.scrollTo({ y: Math.max(topoDoMapa.current - margens.top - 8, 0), animated: false });
+    });
+  }, [comecouOVoo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Volta para a montagem (interrompe o voo e tira os outros drones do mapa)
   const reiniciar = () => {
@@ -486,11 +505,15 @@ export default function Simular() {
     const relogio = setInterval(() => {
       let principal = vooRef.current;
       let rede = outrosRef.current;
-      // Na câmera lenta, a velocidade cai para 0,1× (se a escolhida já for menor, fica a escolhida).
-      // Com a voz ligada, a câmera lenta dura até a voz terminar de contar o evento.
-      const lenta = Date.now() < cameraLentaAte.current || voz.narrandoEvento();
-      const velocidadeAgora = lenta ? Math.min(velocidadeRef.current, VELOCIDADE_CAMERA_LENTA) : velocidadeRef.current;
-      setCameraLenta(lenta);
+      // A velocidade de agora (nunca mais rápida que a escolhida):
+      //   - voz atrasada (2 ou mais mensagens esperando): quase parada, até a voz alcançar;
+      //   - evento (ou a voz contando um evento): câmera lenta, 0,1×.
+      const esperandoRadio = voz.atrasoDaVoz() >= 2;
+      const reagindo = Date.now() < cameraLentaAte.current || voz.narrandoEvento();
+      let velocidadeAgora = velocidadeRef.current;
+      if (esperandoRadio) velocidadeAgora = Math.min(velocidadeAgora, VELOCIDADE_ESPERANDO_RADIO);
+      else if (reagindo) velocidadeAgora = Math.min(velocidadeAgora, VELOCIDADE_CAMERA_LENTA);
+      setCameraLenta(esperandoRadio ? 'radio' : reagindo ? 'evento' : null);
       const passo = (PASSO_KM * velocidadeAgora) / DECISOES_POR_TIQUE;
       for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
         [principal, ...rede] = aproximarDrones([avancarVoo(principal, passo, eventos, regiao), ...avancarRede(rede, passo, regiao)]);
@@ -517,7 +540,7 @@ export default function Simular() {
           novas.push({ id: `${nome}-${Date.now()}-${indice}-${linha}`, nome, cor, texto, evento: Boolean(relato) || ehEvento(texto), parte });
         });
       });
-      if (novas.length > 0) setRadio((atual) => [...atual, ...novas].slice(-30));
+      // A voz decide quando cada uma aparece (desligada, aparecem na hora)
       voz.falar(novas);
       // Algum drone começou a reagir a um evento? Liga (ou estende) a câmera lenta
       if (novas.some((mensagem) => mensagem.evento)) cameraLentaAte.current = Date.now() + DURACAO_CAMERA_LENTA_MS;
@@ -625,7 +648,7 @@ export default function Simular() {
         {/* Aviso de câmera lenta, no alto do mapa */}
         {voo !== null && cameraLenta ? (
           <Text style={styles.avisoCameraLenta} accessibilityLiveRegion="polite">
-            Câmera lenta: reação ao evento
+            {cameraLenta === 'radio' ? 'Câmera lenta: acompanhando o rádio' : 'Câmera lenta: reação ao evento'}
           </Text>
         ) : null}
       </View>

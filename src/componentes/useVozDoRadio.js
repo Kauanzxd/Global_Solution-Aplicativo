@@ -10,7 +10,9 @@ import { chiadoDeAbertura, decodificarAudio, tocarComoRadio } from './somDeRadio
 
 const IDIOMA = 'pt-BR';
 const RITMO = 1.4; // bem mais rápido que o normal, como a fala de rádio (e para não atrasar em relação ao mapa)
-const FILA_MAXIMA = 8; // cabe um relato inteiro; com muitos drones, as falas de rotina mais antigas saem primeiro
+// Mensagens de rotina que a voz fala (os marcos do voo). As outras ("Voando...",
+// "Voltando...", "Sobre o destino...") aparecem só no texto, para a voz não ficar para trás.
+const ROTINA_FALADA = /^(Decolando|Entrega feita!|Missão concluída|Simulação iniciada)/;
 
 // Cada drone fala com uma voz diferente (quando o aparelho tem mais de uma em português)
 // e um tom levemente diferente. Tons muito altos ou baixos deixam a voz robótica: por isso
@@ -84,12 +86,17 @@ function duracaoEstimadaMs(texto) {
   return 1000 + (texto.length * 70) / RITMO;
 }
 
-export default function useVozDoRadio() {
+// "aoMostrar(mensagem)": a tela recebe cada mensagem do rádio NA HORA em que a voz chega
+// nela (assim o texto e a voz andam juntos, na mesma ordem)
+export default function useVozDoRadio({ aoMostrar }) {
+  const aoMostrarRef = useRef(aoMostrar);
+  aoMostrarRef.current = aoMostrar;
+
   const [ligada, setLigada] = useState(true);
   const ligadaRef = useRef(ligada);
   ligadaRef.current = ligada;
 
-  const fila = useRef([]); // [{ nome, falado, audio, evento, parte }]
+  const fila = useRef([]); // [{ mensagem, nome, falado (null = só texto), audio, evento, parte }]
   const atual = useRef(null); // a fala que está tocando agora
   const seguranca = useRef(null); // timer que destrava a fila se o onDone não vier
   const contador = useRef(0); // número de cada fala (para saber qual terminou)
@@ -146,7 +153,13 @@ export default function useVozDoRadio() {
     cortarAudio.current = null;
     atual.current = fila.current.shift() || null;
     if (!atual.current) return;
+    // A mensagem aparece no rádio escrito agora, junto com o começo da fala
+    aoMostrarRef.current(atual.current.mensagem);
     const falado = atual.current.falado;
+    if (!falado) {
+      proxima(); // só texto: já passa para a próxima
+      return;
+    }
     const numero = ++contador.current;
     atual.current.numero = numero;
     // Só passa para a próxima se quem terminou for a fala atual (o aviso da voz e o timer
@@ -170,26 +183,28 @@ export default function useVozDoRadio() {
     seguranca.current = setTimeout(terminou, duracaoEstimadaMs(falado));
   };
 
-  // Coloca mensagens na fila. "mensagens": [{ nome, texto, evento }]
+  // Coloca mensagens na fila. "mensagens": [{ id, nome, cor, texto, evento, parte }]
+  // Todas entram (para o texto sair na ordem certa), mas só algumas são faladas:
+  //   - no relato, só o começo ("checando zonas") e a decisão; as zonas checadas são só texto;
+  //   - na rotina, só os marcos do voo (ROTINA_FALADA).
   const falar = (mensagens) => {
-    if (!ligadaRef.current || mensagens.length === 0) return;
-    // No relato, a voz fala só o começo ("checando zonas") e a decisão; a lista das zonas
-    // checadas (as linhas do meio) fica só na tela
-    mensagens
-      .filter((mensagem) => mensagem.parte !== 'meio')
-      .forEach((mensagem) => {
-        const falado = textoParaFala(fraseDeRadio(mensagem));
-        // o áudio da nuvem começa a baixar já, para estar pronto quando chegar a vez
-        const audio = buscarAudio(falado, vozDaNuvem(mensagem.nome));
-        fila.current.push({ nome: mensagem.nome, falado, audio, evento: mensagem.evento, parte: mensagem.parte });
-      });
-    // Fila cheia: descarta primeiro as falas de rotina mais antigas, depois as mais antigas
-    while (fila.current.length > FILA_MAXIMA) {
-      const rotina = fila.current.findIndex((item) => !item.evento && !item.parte);
-      fila.current.splice(rotina >= 0 ? rotina : 0, 1);
+    if (!ligadaRef.current) {
+      mensagens.forEach((mensagem) => aoMostrarRef.current(mensagem)); // voz desligada: só texto
+      return;
     }
+    mensagens.forEach((mensagem) => {
+      const vaiFalar = mensagem.parte !== 'meio' && (mensagem.evento || ROTINA_FALADA.test(mensagem.texto));
+      const falado = vaiFalar ? textoParaFala(fraseDeRadio(mensagem)) : null;
+      // o áudio da nuvem começa a baixar já, para estar pronto quando chegar a vez
+      const audio = falado ? buscarAudio(falado, vozDaNuvem(mensagem.nome)) : null;
+      fila.current.push({ mensagem, nome: mensagem.nome, falado, audio, evento: mensagem.evento, parte: mensagem.parte });
+    });
     if (!atual.current) proxima();
   };
+
+  // Quantas mensagens a voz ainda tem para contar (a atual + as da fila). A simulação usa
+  // isso para esperar a voz alcançar.
+  const atrasoDaVoz = () => (ligadaRef.current ? fila.current.length + (atual.current ? 1 : 0) : 0);
 
   // Cala a voz e esvazia a fila (nova simulação, interromper, desligar a voz)
   const parar = () => {
@@ -205,11 +220,13 @@ export default function useVozDoRadio() {
   const narrandoEvento = () =>
     ligadaRef.current && Boolean((atual.current && atual.current.evento) || fila.current.some((item) => item.evento));
 
-  // Ao desligar a voz, ou ao sair da tela, para de falar
+  // Ao desligar a voz: o que ainda estava na fila vai direto para o texto, e a voz cala
   useEffect(() => {
-    if (!ligada) parar();
+    if (ligada) return;
+    fila.current.forEach((item) => aoMostrarRef.current(item.mensagem));
+    parar();
   }, [ligada]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => parar, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { ligada, setLigada, falar, parar, narrandoEvento };
+  return { ligada, setLigada, falar, parar, narrandoEvento, atrasoDaVoz };
 }
