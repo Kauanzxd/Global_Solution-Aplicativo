@@ -1,5 +1,6 @@
 import * as Speech from 'expo-speech';
 import { useEffect, useRef, useState } from 'react';
+import { bipDeFim, chiadoDeAbertura } from './somDeRadio';
 
 // Voz do rádio: lê em voz alta as mensagens dos drones (expo-speech, a voz do próprio
 // celular ou navegador). As mensagens entram numa fila e são lidas uma de cada vez.
@@ -7,12 +8,20 @@ import { useEffect, useRef, useState } from 'react';
 // responde true: a tela usa isso para manter a câmera lenta até a fala terminar.
 
 const IDIOMA = 'pt-BR';
-const RITMO = 1.1; // um pouco mais rápido que o normal, para não atrasar em relação ao mapa
-const FILA_MAXIMA = 4; // com muitos drones, as falas mais antigas de rotina são descartadas
+const RITMO = 1.2; // mais rápido que o normal, como a fala de rádio (e para não atrasar em relação ao mapa)
+const FILA_MAXIMA = 8; // cabe um relato inteiro; com muitos drones, as falas de rotina mais antigas saem primeiro
 
-// Cada drone fala com um tom diferente (e, se o aparelho tiver mais de uma voz em
-// português, com uma voz diferente também): assim dá para saber quem está falando.
-const TONS = [1.0, 0.75, 1.3, 0.9, 1.15, 0.65, 1.45];
+// Cada drone fala com uma voz diferente (quando o aparelho tem mais de uma em português)
+// e um tom levemente diferente. Tons muito altos ou baixos deixam a voz robótica: por isso
+// a variação é pequena.
+const TONS = [1.0, 0.92, 1.08, 0.96, 1.04];
+
+// Vozes mais naturais primeiro: as "neurais" do Edge ("Natural", "Online"), as do Google
+// no Chrome e as "Enhanced"/"Premium" do iPhone soam bem menos robóticas que as padrão
+const NATURAL = /natural|online|neural|google|enhanced|premium/i;
+function naturalidade(voz) {
+  return (NATURAL.test(voz.name || '') ? 2 : 0) + (voz.quality === 'Enhanced' ? 1 : 0);
+}
 
 // Número de um nome de rádio: "SADEC-12" → 12; a Central (sem número) → 0
 function numeroDoDrone(nome) {
@@ -30,7 +39,19 @@ export function textoParaFala(texto) {
     .replace(/(\d+(?:,\d+)?) ?km\b/g, '$1 quilômetros') // "4,2 km" → "4,2 quilômetros"
     .replace(/(\d+) ?m\b/g, '$1 metros') // "120 m" → "120 metros"
     .replace(/\.{3}/g, '.') // reticências viram uma pausa simples
-    .replace(/[()]/g, ', '); // parênteses viram pausas
+    .replace(/\s*\(/g, ', ') // parênteses viram pausas
+    .replace(/\)/g, '');
+}
+
+// Como no rádio de aviação: quem fala, para quem, a mensagem e "câmbio" nos eventos.
+// A Central fala para todos ("a todos os drones").
+// "parte" (relatos de várias linhas, uma transmissão só): 'inicio', 'meio' ou 'fim'.
+// Só o início tem a abertura; só o fim tem o "câmbio".
+function fraseDeRadio({ nome, texto, evento, parte }) {
+  const abertura = nome.startsWith('Central') ? `${nome} a todos os drones` : `${nome} para Central`;
+  const comAbertura = !parte || parte === 'inicio';
+  const comCambio = evento && (!parte || parte === 'fim');
+  return `${comAbertura ? `${abertura}: ` : ''}${texto}${comCambio ? ' Câmbio.' : ''}`;
 }
 
 // Quanto tempo uma fala deve levar (para destravar a fila se a voz não avisar que acabou)
@@ -53,16 +74,19 @@ export default function useVozDoRadio() {
   useEffect(() => {
     Speech.getAvailableVoicesAsync()
       .then((lista) => {
-        vozes.current = lista.filter((voz) => voz.language && voz.language.toLowerCase().startsWith('pt'));
+        vozes.current = lista
+          .filter((voz) => voz.language && voz.language.toLowerCase().startsWith('pt-br'))
+          .sort((a, b) => naturalidade(b) - naturalidade(a));
       })
       .catch(() => {});
   }, []);
 
-  // A voz e o tom de cada drone (a Central fala com a voz padrão, no tom normal)
+  // A voz e o tom de cada drone. A Central usa a voz mais natural; cada drone, uma das
+  // vozes da lista (as mais naturais primeiro), em rodízio.
   const jeitoDeFalar = (nome) => {
     const numero = numeroDoDrone(nome);
     const opcoes = { language: IDIOMA, rate: RITMO, pitch: TONS[numero % TONS.length] };
-    if (numero > 0 && vozes.current.length > 1) opcoes.voice = vozes.current[numero % vozes.current.length].identifier;
+    if (vozes.current.length > 0) opcoes.voice = vozes.current[numero % vozes.current.length].identifier;
     return opcoes;
   };
 
@@ -77,8 +101,12 @@ export default function useVozDoRadio() {
     // Só passa para a próxima se quem terminou for a fala atual (o aviso da voz e o timer
     // de segurança podem chegar os dois)
     const terminou = () => {
-      if (atual.current && atual.current.numero === numero) proxima();
+      if (atual.current && atual.current.numero === numero) {
+        if (!['inicio', 'meio'].includes(atual.current.parte)) bipDeFim(); // fim da transmissão
+        proxima();
+      }
     };
+    if (!['meio', 'fim'].includes(atual.current.parte)) chiadoDeAbertura(); // o rádio abre
     Speech.speak(falado, { ...jeitoDeFalar(atual.current.nome), onDone: terminou, onError: terminou });
     seguranca.current = setTimeout(terminou, duracaoEstimadaMs(falado));
   };
@@ -86,10 +114,10 @@ export default function useVozDoRadio() {
   // Coloca mensagens na fila. "mensagens": [{ nome, texto, evento }]
   const falar = (mensagens) => {
     if (!ligadaRef.current || mensagens.length === 0) return;
-    mensagens.forEach((mensagem) => fila.current.push({ nome: mensagem.nome, texto: `${mensagem.nome}. ${mensagem.texto}`, evento: mensagem.evento }));
+    mensagens.forEach((mensagem) => fila.current.push({ nome: mensagem.nome, texto: fraseDeRadio(mensagem), evento: mensagem.evento, parte: mensagem.parte }));
     // Fila cheia: descarta primeiro as falas de rotina mais antigas, depois as mais antigas
     while (fila.current.length > FILA_MAXIMA) {
-      const rotina = fila.current.findIndex((item) => !item.evento);
+      const rotina = fila.current.findIndex((item) => !item.evento && !item.parte);
       fila.current.splice(rotina >= 0 ? rotina : 0, 1);
     }
     if (!atual.current) proxima();
