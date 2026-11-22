@@ -13,6 +13,7 @@ import ResumoVoo from '../../componentes/ResumoVoo';
 import Secao from '../../componentes/Secao';
 import { TEMA } from '../../componentes/tema';
 import { CENARIOS } from '../../dados/cenarios';
+import { MISSOES } from '../../dados/missoes';
 import { AREAS, LOCAIS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../../dados/regiao';
 import { verificarPercurso } from '../../regras/bateria';
 import { distanciaKm } from '../../regras/distancia';
@@ -73,14 +74,6 @@ function coletaSugerida(destino) {
     distanciaKm(hospital, destino) < distanciaKm(melhor, destino) ? hospital : melhor
   );
 }
-
-// Tipos de missão (a prioridade do drone), com uma cor para cada
-const MISSOES = [
-  { valor: 'orgaos', rotulo: 'Órgãos', cor: '#C62828' },
-  { valor: 'emergencia', rotulo: 'Emergência', cor: '#E65100' },
-  { valor: 'saude', rotulo: 'Saúde', cor: '#2E7D32' },
-  { valor: 'comercial', rotulo: 'Comercial', cor: '#0B5CAD' },
-];
 
 // Um cenário pronto → a configuração da tela (destino, missão, bateria e eventos).
 // Cada evento ganha um id próprio, igual aos adicionados à mão.
