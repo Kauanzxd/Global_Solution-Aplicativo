@@ -7,6 +7,7 @@ import Contador from '../../componentes/Contador';
 import EditorEventos from '../../componentes/EditorEventos';
 import Mapa from '../../componentes/Mapa';
 import Opcoes from '../../componentes/Opcoes';
+import ResumoVoo from '../../componentes/ResumoVoo';
 import Secao from '../../componentes/Secao';
 import { TEMA } from '../../componentes/tema';
 import { CENARIOS } from '../../dados/cenarios';
@@ -209,6 +210,26 @@ export default function Simular() {
   // null = montando a simulação; um objeto = o voo acontecendo (ou terminado)
   const [voo, setVoo] = useState(null);
   const emVoo = voo !== null && estaNoAr(voo);
+
+  // Momentos marcantes do voo, para o resumo do fim: cada mensagem nova, com o km do
+  // hodômetro. Mensagens que só mudam os números ("Drone a 225 m" → "Drone a 213 m")
+  // contam como a mesma, para o resumo não repetir a aproximação metro a metro.
+  const [etapasDoVoo, setEtapasDoVoo] = useState([]);
+  useEffect(() => {
+    if (voo === null || !voo.mensagem) return;
+    const semNumeros = (texto) => texto.replace(/[\d.,]+/g, '#');
+    setEtapasDoVoo((atuais) => {
+      const ultima = atuais[atuais.length - 1];
+      if (ultima && semNumeros(ultima.mensagem) === semNumeros(voo.mensagem)) return atuais;
+      return [...atuais, { km: voo.hodometro || 0, mensagem: voo.mensagem }];
+    });
+  }, [voo?.mensagem]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Começa um voo novo (e esvazia os momentos do voo anterior)
+  const iniciar = () => {
+    setEtapasDoVoo([]);
+    setVoo(criarVoo(configuracao));
+  };
 
   // Qual cenário pronto está carregado (null = o usuário montou ou mexeu em algo)
   const [cenario, setCenario] = useState(null);
@@ -458,7 +479,7 @@ export default function Simular() {
 
           <Pressable
             style={[styles.botao, !podeIniciar && styles.botaoDesligado]}
-            onPress={() => setVoo(criarVoo(configuracao))}
+            onPress={iniciar}
             disabled={!podeIniciar}
           >
             <Text style={styles.textoBotao}>Iniciar simulação</Text>
@@ -485,6 +506,11 @@ export default function Simular() {
           </Pressable>
         </View>
       )}
+
+      {/* Voo terminado: o resumo (resultado, distância, tempo, bateria e como foi o voo) */}
+      {voo !== null && !emVoo ? (
+        <ResumoVoo voo={voo} bateriaInicial={configuracao.bateria} etapas={etapasDoVoo} />
+      ) : null}
     </ScrollView>
   );
 }
