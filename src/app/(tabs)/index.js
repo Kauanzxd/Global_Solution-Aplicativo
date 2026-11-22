@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BuscaDestino from '../../componentes/BuscaDestino';
 import Cabecalho from '../../componentes/Cabecalho';
 import CenariosProntos from '../../componentes/CenariosProntos';
 import Contador from '../../componentes/Contador';
 import EditorEventos from '../../componentes/EditorEventos';
+import LegendaMapa from '../../componentes/LegendaMapa';
 import Mapa from '../../componentes/Mapa';
 import Opcoes from '../../componentes/Opcoes';
 import ResumoVoo from '../../componentes/ResumoVoo';
@@ -254,6 +256,10 @@ export default function Simular() {
   // { centro, km } = aproximado numa região (centro em km, tamanho da vista em km)
   const [foco, setFoco] = useState(() => focoDaRota(CONFIGURACAO_INICIAL));
   const [mostrarAlcance, setMostrarAlcance] = useState(false);
+  const [mostrarLegenda, setMostrarLegenda] = useState(false);
+
+  // Áreas da tela ocupadas pelo sistema (entalhe, barra de status): o conteúdo começa abaixo delas
+  const margens = useSafeAreaInsets();
 
   // Muda só um campo da configuração, mantendo os outros (o "..." copia o resto).
   // Mexeu em algo? Deixa de ser exatamente o cenário pronto.
@@ -396,7 +402,7 @@ export default function Simular() {
   const missao = MISSOES.find((m) => m.valor === configuracao.prioridade);
 
   return (
-    <ScrollView style={styles.tela} contentContainerStyle={styles.conteudo}>
+    <ScrollView style={styles.tela} contentContainerStyle={[styles.conteudo, { paddingTop: margens.top + 20 }]}>
       <Cabecalho titulo="Simular voo" subtitulo="Monte uma situação e veja o drone em ação" />
 
       <View style={styles.areaMapa}>
@@ -435,6 +441,16 @@ export default function Simular() {
           aoTocar={voo === null ? tocarNoMapa : undefined}
         />
       </View>
+
+      {/* Legenda do mapa: aparece e some com um toque (na montagem e durante o voo) */}
+      <View style={styles.linhaMapa}>
+        <Pressable style={[styles.chip, mostrarLegenda && styles.chipLigado]} onPress={() => setMostrarLegenda(!mostrarLegenda)}>
+          <Text style={[styles.textoChip, mostrarLegenda && styles.textoChipLigado]}>
+            {mostrarLegenda ? 'Esconder legenda' : 'Legenda do mapa'}
+          </Text>
+        </Pressable>
+      </View>
+      {mostrarLegenda ? <LegendaMapa /> : null}
 
       {voo === null ? (
         // ---------- MONTANDO A SIMULAÇÃO ----------
@@ -600,7 +616,7 @@ const styles = StyleSheet.create({
   },
   conteudo: {
     paddingHorizontal: 16,
-    paddingTop: 48,
+    // paddingTop vem da safe area (margens.top), no próprio componente
     paddingBottom: 32,
   },
   areaMapa: {
