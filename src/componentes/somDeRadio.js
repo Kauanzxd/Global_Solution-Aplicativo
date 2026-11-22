@@ -1,8 +1,8 @@
 import { Platform } from 'react-native';
 
 // Efeitos de rádio para a voz dos drones, gerados na hora com a Web Audio do navegador
-// (sem arquivos de som): o chiado de quando o rádio abre e o "bip" de fim de transmissão,
-// como no rádio de aviação. No app nativo (sem Web Audio), os efeitos ficam mudos.
+// (sem arquivos de som): o chiado de quando o rádio abre e o filtro de rádio na voz da
+// nuvem, como no rádio de aviação. No app nativo (sem Web Audio), os efeitos ficam mudos.
 
 let contexto = null;
 
@@ -38,21 +38,6 @@ export function chiadoDeAbertura() {
 
   ruido.connect(filtro).connect(volume).connect(ctx.destination);
   ruido.start();
-}
-
-// Bip de fim de transmissão ("câmbio"): um tom curto e agudo
-export function bipDeFim() {
-  const ctx = audio();
-  if (!ctx) return;
-  const tom = ctx.createOscillator();
-  tom.type = 'sine';
-  tom.frequency.value = 1750;
-  const volume = ctx.createGain();
-  volume.gain.setValueAtTime(0.08, ctx.currentTime);
-  volume.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-  tom.connect(volume).connect(ctx.destination);
-  tom.start();
-  tom.stop(ctx.currentTime + 0.12);
 }
 
 // ---------- Voz da nuvem ----------

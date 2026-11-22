@@ -1,7 +1,7 @@
 import * as Speech from 'expo-speech';
 import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import { bipDeFim, chiadoDeAbertura, decodificarAudio, tocarComoRadio } from './somDeRadio';
+import { chiadoDeAbertura, decodificarAudio, tocarComoRadio } from './somDeRadio';
 
 // Voz do rádio: lê em voz alta as mensagens dos drones (expo-speech, a voz do próprio
 // celular ou navegador). As mensagens entram numa fila e são lidas uma de cada vez.
@@ -152,10 +152,7 @@ export default function useVozDoRadio() {
     // Só passa para a próxima se quem terminou for a fala atual (o aviso da voz e o timer
     // de segurança podem chegar os dois)
     const terminou = () => {
-      if (atual.current && atual.current.numero === numero) {
-        if (!['inicio', 'meio'].includes(atual.current.parte)) bipDeFim(); // fim da transmissão
-        proxima();
-      }
+      if (atual.current && atual.current.numero === numero) proxima();
     };
     if (!['meio', 'fim'].includes(atual.current.parte)) chiadoDeAbertura(); // o rádio abre
 
