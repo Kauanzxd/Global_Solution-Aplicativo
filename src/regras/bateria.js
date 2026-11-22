@@ -54,8 +54,17 @@ export function bateriaParaEntregarEIrAZona(distanciaAteDestino, distanciaDestin
 // sobe de novo e desce no hub (3% cada).
 // Devolve a decisão (pode) e os números que levaram a ela, para mostrar na tela.
 export function verificarDecolagem(origem, destino, bateriaAtual) {
-  const distanciaTotal = distanciaKm(origem, destino) * 2; // ida + volta
-  const necessaria = bateriaNecessaria(distanciaTotal) + BATERIA_POUSO_VERTICAL * 4;
+  return verificarPercurso([origem, destino, origem], bateriaAtual); // ida + volta
+}
+
+// Mesma regra para qualquer percurso (lista de paradas, da filial até a filial):
+// soma todos os trechos e, em cada trecho, uma subida e uma descida de 120 m.
+// Ex.: missão de órgãos = [filial, hospital da coleta, hospital da entrega, filial] → 3 trechos.
+export function verificarPercurso(paradas, bateriaAtual) {
+  let distanciaTotal = 0;
+  for (let i = 1; i < paradas.length; i++) distanciaTotal += distanciaKm(paradas[i - 1], paradas[i]);
+  const trechos = paradas.length - 1;
+  const necessaria = bateriaNecessaria(distanciaTotal) + BATERIA_POUSO_VERTICAL * 2 * trechos;
   const necessariaComMargem = necessaria * (1 + MARGEM_SEGURANCA);
 
   return {

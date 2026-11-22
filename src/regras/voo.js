@@ -13,6 +13,8 @@
 // 'pouso-paraquedas', 'pousou-hub', 'aguardando-resgate' e 'queda'.
 //
 // Etapas da missão (voo.etapa): 'ida' (hub → ponto de entrega) e 'volta' (de volta ao hub).
+// Na missão de órgãos (voo.coleta definido), antes da ida vem a 'coleta':
+// hub → hospital da coleta (pousa e pega o órgão) → hospital da entrega → filial.
 //
 // Eventos acontecem no "km da viagem", contado pelo HODÔMETRO: a distância total
 // voada desde o hub, somando todos os trechos (como o odômetro de um carro).
@@ -26,6 +28,7 @@ import {
   bateriaParaChegar,
   bateriaParaEntregarEIrAZona,
   verificarDecolagem,
+  verificarPercurso,
 } from './bateria.js';
 import { distanciaKm, zonaMaisProxima } from './distancia.js';
 import {
@@ -203,6 +206,7 @@ function continuar(voo) {
     etapa: voo.etapa, // 'ida' ou 'volta'
     hub: voo.hub, // de onde o drone saiu (e para onde volta)
     destinoFinal: voo.destinoFinal, // o alvo da etapa: ponto de entrega na ida, hub na volta
+    destinoEntrega: voo.destinoEntrega, // missão de órgãos: o hospital da entrega (depois da coleta)
     // GPS
     semGps: voo.semGps,
     incerteza: voo.incerteza,
@@ -281,8 +285,9 @@ function decolar(voo, eventos, passoKm, regiao) {
   }
 
   // O vento não é um problema na decolagem: ele só passa a valer quando o drone começa a andar.
-  // Eventos no km 0 são da decolagem no HUB (na ida); a decolagem de volta não tem km 0.
-  const naIda = voo.etapa !== 'volta';
+  // Eventos no km 0 são só da PRIMEIRA decolagem, no hub (hodômetro ainda zerado). As outras
+  // decolagens (depois da coleta e depois da entrega) não têm km 0.
+  const naIda = (voo.hodometro ?? 0) === 0;
   const evento = eventos.find((e) => {
     const altitudeDoEvento = e.altitude ?? ALTITUDE_EVENTO_DECOLAGEM;
     return naIda && e.km === 0 && e.tipo !== 'vento' && voo.altitude < altitudeDoEvento && altitude >= altitudeDoEvento;
@@ -318,7 +323,9 @@ function decolar(voo, eventos, passoKm, regiao) {
     // Chegou a 120 m: começa a andar. Se houver vento no km 0, ele começa a valer agora.
     const ventoNoKm0 = naIda ? eventos.find((e) => e.km === 0 && e.tipo === 'vento') : undefined;
     const vento = ventoNoKm0 ? criarVento(ventoNoKm0) : voo.vento;
-    let mensagem = naIda ? 'Voando...' : 'Voltando para a filial...';
+    let mensagem = 'Voando...';
+    if (voo.etapa === 'volta') mensagem = 'Voltando para a filial...';
+    else if (voo.etapa === 'ida' && voo.destinoEntrega) mensagem = `Levando o órgão para ${voo.destinoEntrega.nome}...`;
     if (ventoNoKm0) mensagem = textoVento(vento);
     // O hodômetro conta a viagem inteira: na volta, continua de onde parou
     return { ...voo, altitude, situacao: 'voando', hodometro: voo.hodometro ?? 0, vento, mensagem };
@@ -345,6 +352,11 @@ function entregar(voo, passoKm, regiao) {
 
   const local = posicaoAtual(voo);
   const tem = voo.bateria ?? 100;
+
+  // Missão de órgãos: aqui foi a COLETA. Pega o órgão e decola para o hospital da entrega,
+  // se a bateria cobrir a entrega e, depois, a ida até uma zona controlada (com a margem).
+  if (voo.etapa === 'coleta') return decolarComOrgao(voo, local, tem, regiao);
+
   const hub = filialMaisProxima(local, regiao.zonas);
 
   // Para onde vai: a filial mais próxima, se der; senão, a zona mais perto que dá para alcançar
@@ -408,6 +420,31 @@ function entregar(voo, passoKm, regiao) {
   };
 }
 
+// Depois da coleta: decola com o órgão para o hospital da entrega
+function decolarComOrgao(voo, local, tem, regiao) {
+  const entrega = voo.destinoEntrega;
+  const zonaDepois = zonaMaisProxima(entrega, regiao.zonas);
+  const precisa = bateriaParaEntregarEIrAZona(distanciaKm(local, entrega), zonaDepois.distancia) + BATERIA_POUSO_VERTICAL * (1 + MARGEM_SEGURANCA);
+  if (tem < precisa) {
+    return {
+      ...voo,
+      situacao: 'aguardando-resgate',
+      mensagem: `Órgão coletado, mas a bateria (${Math.round(tem)}%) não cobre a entrega com margem (${Math.round(precisa)}%). O drone fica no hospital e o órgão segue por outro meio de transporte`,
+    };
+  }
+  return {
+    ...continuar(voo),
+    origem: local,
+    destino: entrega,
+    destinoFinal: entrega,
+    km: 0,
+    altitude: 0,
+    etapa: 'ida',
+    situacao: 'decolando',
+    mensagem: `Órgão coletado! Decolando para ${entrega.nome}`,
+  };
+}
+
 // O que falta para terminar a etapa, e quanto de bateria isso exige (já com a margem).
 // Na ida: entregar e depois ainda chegar a uma zona de pouso. Na volta: chegar ao hub.
 function bateriaParaTerminar(voo, local, regiao) {
@@ -415,6 +452,18 @@ function bateriaParaTerminar(voo, local, regiao) {
     const alvo = voo.destinoFinal; // a filial, ou a zona escolhida depois da entrega
     const oQue = alvo.ehHub ? `a volta ${comArtigo(alvo, 'à')}` : `a ida ${comArtigo(alvo, 'à')}`;
     return { precisa: bateriaParaChegar(distanciaKm(local, alvo)), oQue };
+  }
+  // Na coleta: chegar ao hospital da coleta, pousar, subir, levar o órgão até a entrega e,
+  // de lá, ainda chegar a uma zona controlada
+  if (voo.etapa === 'coleta') {
+    const coleta = voo.destinoFinal;
+    const entrega = voo.destinoEntrega;
+    const zonaDepois = zonaMaisProxima(entrega, regiao.zonas);
+    const distancia = distanciaKm(local, coleta) + distanciaKm(coleta, entrega);
+    return {
+      precisa: bateriaParaEntregarEIrAZona(distancia, zonaDepois.distancia) + BATERIA_POUSO_VERTICAL * 2 * (1 + MARGEM_SEGURANCA),
+      oQue: 'a coleta e a entrega do órgão',
+    };
   }
   const destino = voo.destinoFinal;
   const zonaDepois = zonaMaisProxima(destino, regiao.zonas); // a zona mais perto do ponto de entrega
@@ -1081,6 +1130,16 @@ function chegarAoFim(voo, total) {
     );
   }
 
+  if (voo.situacao === 'voando' && voo.etapa === 'coleta') {
+    return iniciarDescida(
+      chegou,
+      ALTITUDE_CRUZEIRO,
+      `Sobre ${voo.destino.nome}: descendo para coletar o órgão`,
+      'entregando',
+      'Pousou no hospital da coleta: carregando o órgão na caixa térmica...'
+    );
+  }
+
   if (voo.situacao === 'voando') {
     return iniciarDescida(
       chegou,
@@ -1128,19 +1187,26 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   // Se o drone já está no chão, nada muda
   if (!estaNoAr(voo)) return voo;
 
-  // No começo: guarda o hub (de onde saiu), o ponto de entrega e a etapa da missão
+  // No começo: guarda o hub (de onde saiu), o ponto de entrega e a etapa da missão.
+  // Missão de órgãos: o primeiro alvo é o hospital da coleta; a entrega fica guardada.
+  if (voo.hub === undefined && voo.coleta) {
+    voo = { ...voo, destinoEntrega: voo.destino, destino: voo.coleta, destinoFinal: voo.coleta, etapa: 'coleta' };
+  }
   if (voo.destinoFinal === undefined) voo = { ...voo, destinoFinal: voo.destino };
   if (voo.hub === undefined) {
-    voo = { ...voo, hub: voo.origem, etapa: 'ida' };
+    voo = { ...voo, hub: voo.origem, etapa: voo.etapa || 'ida' };
 
-    // Regra que vale sempre: só decola se a bateria cobrir ida + volta, com margem
+    // Regra que vale sempre: só decola se a bateria cobrir o percurso inteiro, com margem
+    // (ida + volta; na missão de órgãos, filial → coleta → entrega → filial)
     if (voo.bateria !== undefined) {
-      const decolagem = verificarDecolagem(voo.origem, voo.destino, voo.bateria);
+      const decolagem = voo.destinoEntrega
+        ? verificarPercurso([voo.origem, voo.coleta, voo.destinoEntrega, filialMaisProxima(voo.destinoEntrega, regiao.zonas) || voo.origem], voo.bateria)
+        : verificarDecolagem(voo.origem, voo.destino, voo.bateria);
       if (!decolagem.pode) {
         return {
           ...voo,
           situacao: 'decolagem-negada',
-          mensagem: `Decolagem negada: a bateria tem ${Math.round(voo.bateria)}%, mas ida + volta + 30% de margem precisam de ${Math.round(decolagem.necessariaComMargem)}%`,
+          mensagem: `Decolagem negada: a bateria tem ${Math.round(voo.bateria)}%, mas o percurso + 30% de margem precisa de ${Math.round(decolagem.necessariaComMargem)}%`,
         };
       }
     }
