@@ -223,10 +223,6 @@ AZURE_SPEECH_REGION=regiao-do-recurso   # ex.: eastus
 | `node scripts/calcular-filiais.mjs` | Recalcula as filiais e mostra a cobertura |
 | `npx expo export --platform web` e depois<br/>`npx eas-cli@latest deploy --prod --environment production` | Gera a versão web e publica no EAS Hosting (a chave do Azure fica nas variáveis de ambiente do EAS) |
 
-## 🤖 Uso de inteligência artificial
-
-Este app foi desenvolvido com o apoio do **Claude (Anthropic)**, no Claude Code, como tutor e par de programação: explicações dos conceitos passo a passo, sugestões de código, testes das regras no Node e revisões. As decisões do projeto (regras do drone, cenários, telas e o que entra em cada versão), os testes no celular e todos os commits foram feitos pelo autor.
-
 ## 📚 Fontes dos dados
 
 - **Contorno da cidade:** IBGE.
@@ -240,6 +236,10 @@ Este app foi desenvolvido com o apoio do **Claude (Anthropic)**, no Claude Code,
 
 - **Projeto completo** (Python, Java, Banco de Dados, ChatBot e Engenharia de Software): repositório `Global_Solution-projects` (privado)
 - **Site:** [Global_Solution-Site](https://github.com/Kauanzxd/Global_Solution-Site)
+
+## 📄 Licença
+
+Código sob a licença [MIT](LICENSE): pode ser usado, copiado e modificado, desde que o aviso de copyright seja mantido. Os dados do mapa seguem as licenças das fontes acima (OpenStreetMap: ODbL).
 
 ## 👥 Equipe
 
