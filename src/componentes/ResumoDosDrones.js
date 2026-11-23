@@ -45,6 +45,10 @@ const styles = StyleSheet.create({
   },
   aba: {
     maxHeight: '85%',
+    // A mesma largura máxima do app (src/app/_layout.js): numa tela larga, a aba não estica
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     backgroundColor: TEMA.fundo,

@@ -43,6 +43,8 @@ export default function useGestosDoMapa(unidadesPorPx) {
     // O navegador não rola a página nem dá zoom nela com o dedo em cima do mapa: os gestos
     // ficam com o mapa (para rolar a página, o dedo vai fora do mapa)
     no.style.touchAction = 'none';
+    // No computador, o cursor de "mão" mostra que dá para arrastar o mapa
+    no.style.cursor = 'grab';
 
     const dedos = new Map(); // dedos (ou o mouse) apertados agora: id → { x, y }
     let pinca = null; // { distancia, fator } no começo da pinça
@@ -70,6 +72,7 @@ export default function useGestosDoMapa(unidadesPorPx) {
         // sem captura, o gesto funciona do mesmo jeito enquanto o dedo estiver no mapa
       }
       dedos.set(evento.pointerId, { x: evento.clientX, y: evento.clientY });
+      no.style.cursor = 'grabbing'; // a mão fechada: segurando o mapa
       const [a, b] = [...dedos.values()];
       if (dedos.size === 1) {
         andou = 0;
@@ -95,16 +98,39 @@ export default function useGestosDoMapa(unidadesPorPx) {
     const soltar = (evento) => {
       if (!dedos.has(evento.pointerId)) return;
       dedos.delete(evento.pointerId);
+      if (dedos.size === 0) no.style.cursor = 'grab';
       if (andou > PX_PARA_SER_ARRASTO) fimDoArrasto.current = Date.now();
       pinca = null;
       // Sobrou um dedo depois da pinça: ele continua arrastando dali
       const [restante] = [...dedos.values()];
       anterior = restante || null;
     };
-    // Roda do mouse: cada "clique" da roda aproxima ou afasta uns 10%
+    // Roda do mouse: cada "clique" da roda aproxima ou afasta uns 20%, NO PONTO onde o mouse
+    // está (o lugar debaixo do cursor fica parado, como no Google Maps)
     const roda = (evento) => {
       evento.preventDefault();
-      setFator((atual) => limitarFator(atual * 1.1 ** (evento.deltaY / 100)));
+      // Cada navegador mede a roda de um jeito: em px (0), em linhas (1) ou em páginas (2)
+      let passo = evento.deltaY * (evento.deltaMode === 1 ? 40 : evento.deltaMode === 2 ? 800 : 1);
+      // Pinça no touchpad do notebook: chega como roda com Ctrl e passos bem pequenos
+      if (evento.ctrlKey) passo *= 4;
+      const atual = fatorRef.current;
+      const novo = limitarFator(atual * 1.2 ** (passo / 100));
+      if (novo === atual) return;
+      fatorRef.current = novo; // a próxima volta da roda já parte daqui, sem esperar a tela
+      setFator(novo);
+
+      // Onde está o mouse, de 0 a 1 dentro do mapa (0,5 = no meio)
+      const retangulo = no.getBoundingClientRect();
+      const fracaoX = (evento.clientX - retangulo.left) / retangulo.width;
+      const fracaoY = (evento.clientY - retangulo.top) / retangulo.height;
+      // A vista (em unidades do desenho) antes e depois do zoom; a diferença vai para o
+      // lado oposto ao mouse, para o ponto debaixo dele não sair do lugar
+      const vistaAntes = unidadesPorPx.current * retangulo.width;
+      const diferenca = vistaAntes - vistaAntes * (novo / atual);
+      setDeslocamento((d) => ({
+        x: limitarDeslocamento(d.x + diferenca * (0.5 - fracaoX)),
+        y: limitarDeslocamento(d.y + diferenca * (0.5 - fracaoY)),
+      }));
     };
     // Safari do iPhone: o gesto de pinça do sistema é desligado só em cima do mapa
     const bloquearGestoDoSafari = (evento) => evento.preventDefault();
