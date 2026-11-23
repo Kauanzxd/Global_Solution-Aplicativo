@@ -118,7 +118,7 @@ export function avancarRede(voos, passoKm, regiao) {
   return voos.map((voo) => {
     if (voo.espera > 0) {
       const espera = voo.espera - passoKm;
-      return espera > 0 ? { ...voo, espera } : { ...voo, espera, mensagem: 'Decolando, é a minha vez' };
+      return espera > 0 ? { ...voo, espera } : { ...voo, espera, mensagem: 'Decolando...' };
     }
     return avancarVoo(voo, passoKm, [], regiao);
   });
@@ -145,6 +145,71 @@ function esquecerDrone(voo, idOutro, altitudeOutro) {
   };
 }
 
+// ---------- Um acordo só para os dois ----------
+// Pelo rádio, o primeiro drone que decide manda o acordo e o outro confirma ("Entendido"),
+// como num rádio de verdade. Assim os dois nunca ficam com acordos diferentes (antes, cada
+// um decidia sozinho, com a bateria do outro anotada lá atrás, e os dois achavam que o OUTRO
+// ia desviar).
+const nomeDe = (voo) => voo.idDrone ?? 'SADEC-01';
+const obstaculoDo = (voo, id) => (voo.obstaculos || []).find((o) => o.tipo === 'drone' && o.id === id);
+
+// Situações em que o drone está andando (nas outras, está parado: subindo, descendo, entregando...)
+const ANDANDO = ['voando', 'desviando', 'afastando', 'motor-fraco', 'planando'];
+const VELOCIDADE_KM_S = 0.015; // 15 m/s, a mesma dos voos
+
+// O drone da rede, visto por outro, é um "espelho" dele: a cada passo, o obstáculo recebe a
+// posição e o rumo DE VERDADE do outro drone (antes, ele vinha sempre de frente, pela rota de
+// quem via, e até um drone atrás, na mesma direção, parecia vir de encontro).
+// Enquanto não há acordo, a bateria e a missão do outro também são atualizadas.
+function atualizarOutro(voo, outro) {
+  const id = nomeDe(outro);
+  if (!obstaculoDo(voo, id)) return voo;
+  const aqui = posicao(outro);
+  const dx = outro.destino.x - outro.origem.x;
+  const dy = outro.destino.y - outro.origem.y;
+  const tamanho = Math.hypot(dx, dy) || 1;
+  const rumo = { x: dx / tamanho, y: dy / tamanho };
+  const rapidez = ANDANDO.includes(outro.situacao) ? VELOCIDADE_KM_S : 0;
+  const movimento = {
+    espelho: true,
+    pontoNaRota: aqui, // onde ele está agora...
+    chegada: voo.tempo || 0, // ...neste instante
+    velocidade: { x: rumo.x * rapidez, y: rumo.y * rapidez },
+    direita: { x: -rumo.y, y: rumo.x }, // a direita dele, no rumo dele
+  };
+  return {
+    ...voo,
+    obstaculos: voo.obstaculos.map((o) => {
+      if (o.tipo !== 'drone' || o.id !== id) return o;
+      const dados = o.acordo ? {} : { bateria: Math.round(outro.bateria ?? 60), prioridade: outro.prioridade ?? 'saude' };
+      return { ...o, ...movimento, ...dados };
+    }),
+  };
+}
+
+// "voo" recebe o acordo que "quemFalou" mandou e confirma pelo rádio
+function receberAcordo(voo, quemFalou, acordo) {
+  const desviamos = acordo.desvia === nomeDe(voo);
+  return {
+    ...voo,
+    obstaculos: voo.obstaculos.map((o) => (o.tipo === 'drone' && o.id === quemFalou ? { ...o, acordo: { ...acordo } } : o)),
+    mensagem: desviamos
+      ? `Entendido, ${quemFalou}: nós desviamos pela direita`
+      : `Entendido, ${quemFalou}: você desvia pela direita, nós seguimos reto`,
+  };
+}
+
+// Se só um dos dois já fechou o acordo (ou os dois fecharam diferente no mesmo instante),
+// vale o de quem falou primeiro na lista
+function sincronizarAcordo(a, b) {
+  const deA = obstaculoDo(a, nomeDe(b));
+  const deB = obstaculoDo(b, nomeDe(a));
+  if (!deA || !deB) return [a, b];
+  if (deA.acordo && (!deB.acordo || deB.acordo.desvia !== deA.acordo.desvia)) return [a, receberAcordo(b, nomeDe(a), deA.acordo)];
+  if (deB.acordo && !deA.acordo) return [receberAcordo(a, nomeDe(b), deB.acordo), b];
+  return [a, b];
+}
+
 // Drones perto um do outro (até 800 m, quando o obstáculo "entra em cena") se enxergam,
 // desde que estejam quase na mesma altura (bolha de altura).
 // "todos": o principal e os extras. Cada par entra uma vez em cada um (avistarDrone cuida disso).
@@ -167,8 +232,9 @@ export function aproximarDrones(todos) {
         continue;
       }
       const comoOutro = (voo) => ({ id: nome(voo), prioridade: voo.prioridade ?? 'saude', bateria: voo.bateria });
-      prontos[i] = avistarDrone(a, comoOutro(b));
-      prontos[j] = avistarDrone(b, comoOutro(a));
+      const vistoA = atualizarOutro(avistarDrone(a, comoOutro(b)), b);
+      const vistoB = atualizarOutro(avistarDrone(b, comoOutro(a)), a);
+      [prontos[i], prontos[j]] = sincronizarAcordo(vistoA, vistoB);
     }
   }
   return prontos;

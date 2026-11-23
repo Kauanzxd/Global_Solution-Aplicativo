@@ -919,29 +919,56 @@ function direcaoDoTrecho(voo) {
   return { x: (voo.destino.x - local.x) / total, y: (voo.destino.y - local.y) / total };
 }
 
-// A ameaça mais urgente, ou null se nenhum obstáculo vai chegar perto demais
-function ameacaMaisUrgente(voo) {
+// Previsão de aproximação entre o drone e um obstáculo (as contas de "ponto de maior
+// aproximação", com posição e velocidade RELATIVAS):
+//   agora: onde o obstáculo está; distancia: a distância agora;
+//   r e v: posição e velocidade dele, vistas do drone;
+//   t: em quantos segundos os dois ficam mais perto; menorDistancia: quão perto ficam.
+function preverAproximacao(voo, obstaculo) {
   const local = posicaoAtual(voo);
   const direcao = direcaoDoTrecho(voo);
   const velocidadeDrone = { x: direcao.x * VELOCIDADE_DRONE_KM_S, y: direcao.y * VELOCIDADE_DRONE_KM_S };
+  // 1. O sensor mede o ponto mais perigoso do obstáculo, agora e 1 segundo antes;
+  //    a velocidade é quanto esse ponto andou nesse segundo
+  const { agora, antes } = medirObstaculo(obstaculo, voo.tempo, local);
+  const velocidadeObstaculo = { x: agora.x - antes.x, y: agora.y - antes.y };
+  // 2. Ponto de maior aproximação
+  const r = { x: agora.x - local.x, y: agora.y - local.y };
+  const v = { x: velocidadeObstaculo.x - velocidadeDrone.x, y: velocidadeObstaculo.y - velocidadeDrone.y };
+  const v2 = v.x ** 2 + v.y ** 2;
+  const t = v2 > 0 ? Math.max(0, -(r.x * v.x + r.y * v.y) / v2) : 0; // segundos até lá
+  const futuro = { x: r.x + v.x * t, y: r.y + v.y * t }; // onde ele estará, visto do drone
+  return { agora, distancia: distanciaKm(local, agora), r, v, t, futuro, menorDistancia: Math.hypot(futuro.x, futuro.y), direcao, velocidadeObstaculo };
+}
+
+// Rumos parecidos (até 30° de diferença): os dois voam na mesma direção, um seguindo o outro
+const COS_MESMA_DIRECAO = Math.cos((30 * Math.PI) / 180);
+function mesmaDirecao(direcao, velocidade) {
+  const rapidez = Math.hypot(velocidade.x, velocidade.y);
+  return (direcao.x * velocidade.x + direcao.y * velocidade.y) / rapidez > COS_MESMA_DIRECAO;
+}
+
+// Outro drone da rede vai mesmo cruzar o nosso caminho? Só então vale conversar pelo rádio.
+// "Cruzar" = o outro está andando, com rumo diferente do nosso (mais de 30°), e nos próximos
+// 60 s os dois ficam a menos de 3 bolhas (300 m). Não conversam:
+//   - dois drones na mesma direção, um atrás do outro (um só segue o outro);
+//   - com o outro parado no ar, subindo ou descendo numa filial ou num ponto de entrega
+//     (a bolha de altura resolve em segundos).
+// Nesses casos, se chegar perto demais, o desviador em tempo real cuida da segurança.
+function emRotaDeColisao(voo, outro) {
+  const { t, menorDistancia, direcao, velocidadeObstaculo } = preverAproximacao(voo, outro);
+  const parado = Math.hypot(velocidadeObstaculo.x, velocidadeObstaculo.y) === 0;
+  if (parado || mesmaDirecao(direcao, velocidadeObstaculo)) return false;
+  return t <= HORIZONTE_PREVISAO_S && menorDistancia < bolhaDe(outro) * 3;
+}
+
+// A ameaça mais urgente, ou null se nenhum obstáculo vai chegar perto demais
+function ameacaMaisUrgente(voo) {
   let maisUrgente = null;
 
   for (const obstaculo of voo.obstaculos || []) {
-    // 1. O sensor mede o ponto mais perigoso do obstáculo, agora e 1 segundo antes
-    const { agora, antes } = medirObstaculo(obstaculo, voo.tempo, local);
-    const distancia = distanciaKm(local, agora);
+    const { distancia, r, v, t, futuro, menorDistancia, direcao } = preverAproximacao(voo, obstaculo);
     if (distancia > deteccaoDe(obstaculo)) continue; // o sensor ainda não enxerga
-
-    // A velocidade é quanto esse ponto andou no último segundo
-    const velocidadeObstaculo = { x: agora.x - antes.x, y: agora.y - antes.y };
-
-    // 2. Ponto de maior aproximação, com posição e velocidade RELATIVAS
-    const r = { x: agora.x - local.x, y: agora.y - local.y }; // onde ele está, visto do drone
-    const v = { x: velocidadeObstaculo.x - velocidadeDrone.x, y: velocidadeObstaculo.y - velocidadeDrone.y };
-    const v2 = v.x ** 2 + v.y ** 2;
-    const t = v2 > 0 ? Math.max(0, -(r.x * v.x + r.y * v.y) / v2) : 0; // segundos até lá
-    const futuro = { x: r.x + v.x * t, y: r.y + v.y * t }; // onde ele estará, visto do drone
-    const menorDistancia = Math.sqrt(futuro.x ** 2 + futuro.y ** 2);
 
     // Outro drone com acordo de que ELE desvia: confiamos no combinado e seguimos reto,
     // mas continuamos vigiando: se ele entrar na nossa bolha, reagimos mesmo assim
@@ -1382,7 +1409,8 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
         o.tipo === 'drone' &&
         o.comunicacao &&
         !o.acordo &&
-        distanciaKm(local, posicaoObstaculo(o, voo.tempo)) <= DETECCAO_RADIO_KM
+        distanciaKm(local, posicaoObstaculo(o, voo.tempo)) <= DETECCAO_RADIO_KM &&
+        emRotaDeColisao(voo, o)
     );
     if (semAcordo) return negociar(voo, semAcordo);
 

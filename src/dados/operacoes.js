@@ -31,17 +31,16 @@ export const OPERACAO_ENCHENTE = {
   ],
   // Cada drone: de qual filial sai, para qual abrigo, o que leva, a bateria e quantos
   // segundos espera na filial (saídas escalonadas). O primeiro é o drone "principal" da tela.
-  // As esperas foram escolhidas testando a operação: com elas, os drones da mesma filial não
-  // se encontram na ida, as decolagens saem uma depois da outra, e só há 2 encontros, na
-  // volta: SADEC-11 × 14 (conversa e desvio) e SADEC-15 × 12 (conversa e, quando o 12 começa
-  // a descer, a bolha de altura cancela o desvio).
+  // Os abrigos e as esperas foram escolhidos testando as 720 distribuições possíveis: com
+  // estas, as decolagens saem uma depois da outra e há 2 cruzamentos de verdade (rotas com
+  // rumos diferentes): SADEC-12 × 14 no meio da ida e SADEC-11 × 13 na volta.
   drones: [
     { idDrone: 'SADEC-11', filial: 'F-03', abrigo: 'abrigo-helena', suprimento: 'Água potável (5 L)', bateria: 80, esperaS: 0 },
     { idDrone: 'SADEC-12', filial: 'F-03', abrigo: 'abrigo-romano', suprimento: 'Kit de primeiros socorros', bateria: 70, esperaS: 90 },
-    { idDrone: 'SADEC-13', filial: 'F-03', abrigo: 'abrigo-meninas', suprimento: 'Medicamentos básicos para abrigo', bateria: 75, esperaS: 300 },
-    { idDrone: 'SADEC-14', filial: 'F-15', abrigo: 'abrigo-itaim', suprimento: 'Água potável (5 L)', bateria: 80, esperaS: 0 },
-    { idDrone: 'SADEC-15', filial: 'F-15', abrigo: 'abrigo-curuca', suprimento: 'Kit de primeiros socorros', bateria: 70, esperaS: 120 },
-    { idDrone: 'SADEC-16', filial: 'F-07', abrigo: 'abrigo-martinho', suprimento: 'Medicamentos básicos para abrigo', bateria: 95, esperaS: 0 },
+    { idDrone: 'SADEC-13', filial: 'F-03', abrigo: 'abrigo-curuca', suprimento: 'Medicamentos básicos para abrigo', bateria: 75, esperaS: 300 },
+    { idDrone: 'SADEC-14', filial: 'F-15', abrigo: 'abrigo-meninas', suprimento: 'Água potável (5 L)', bateria: 80, esperaS: 0 },
+    { idDrone: 'SADEC-15', filial: 'F-15', abrigo: 'abrigo-martinho', suprimento: 'Kit de primeiros socorros', bateria: 70, esperaS: 120 },
+    { idDrone: 'SADEC-16', filial: 'F-07', abrigo: 'abrigo-itaim', suprimento: 'Medicamentos básicos para abrigo', bateria: 95, esperaS: 0 },
   ],
 };
 

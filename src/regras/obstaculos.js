@@ -113,7 +113,9 @@ export function posicaoObstaculo(obstaculo, tempo) {
 
   if (obstaculo.tipo === 'drone') {
     let andou = dt; // quanto tempo ele andou na direção dele
-    let lado = desvioDoOutroDrone(obstaculo, tempo); // quanto ele está para a direita dele
+    // Quanto ele está para a direita dele. No "espelho" de um drone da rede, a posição já é a
+    // de verdade (com o desvio que ele estiver fazendo): não soma desvio de novo.
+    let lado = obstaculo.espelho ? 0 : desvioDoOutroDrone(obstaculo, tempo);
 
     if (obstaculo.comportamento === 'pairando') andou = 0; // parado no ar, em cima da rota
     if (obstaculo.comportamento === 'errante') {
