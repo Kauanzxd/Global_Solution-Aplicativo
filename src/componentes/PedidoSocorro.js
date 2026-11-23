@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { CARGA_MAXIMA_KG, SUPRIMENTOS } from '../dados/comercio';
-import { ENDERECOS } from '../dados/enderecos';
 import { FILIAIS } from '../dados/regiao';
 import { avaliarPedido } from '../regras/pedidos';
 import AvaliacaoPedido from './AvaliacaoPedido';
@@ -39,9 +38,9 @@ export default function PedidoSocorro({ aoPedir }) {
         aoEscolher={setSuprimento}
       />
 
-      <Text style={styles.rotulo}>Área atingida (bairro)</Text>
+      <Text style={styles.rotulo}>Área atingida (endereço)</Text>
       {area ? <Text style={styles.escolhido}>{area.nome}</Text> : null}
-      <BuscaDestino locais={ENDERECOS} aoEscolher={setArea} placeholder="Buscar bairro (ex.: Jardim Ângela)" />
+      <BuscaDestino locais={[]} aoEscolher={setArea} comEndereco placeholder="Endereço da área atingida (ex.: Estrada do M'Boi Mirim)" />
 
       {avaliacao ? <AvaliacaoPedido avaliacao={avaliacao} /> : null}
       <BotaoPrincipal texto="Enviar suprimento" aoTocar={pedir} desligado={!avaliacao || !avaliacao.pode} />

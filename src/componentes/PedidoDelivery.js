@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { CARGA_MAXIMA_KG, LOJAS, TAXA_DRONE_CENTAVOS, emReais, resumoDaSacola } from '../dados/comercio';
-import { ENDERECOS } from '../dados/enderecos';
 import { FILIAIS } from '../dados/regiao';
 import { avaliarPedido } from '../regras/pedidos';
 import AvaliacaoPedido from './AvaliacaoPedido';
@@ -11,7 +10,7 @@ import Secao from './Secao';
 import { TEMA } from './tema';
 
 // Pedido comercial (prioridade 4), como o SADEC Delivery do site:
-// escolhe o restaurante, monta a sacola, escolhe o bairro e pede. A loja é o ponto da coleta.
+// escolhe o restaurante, monta a sacola, busca o endereço de entrega e pede. A loja é o ponto da coleta.
 // "aoPedir(dados)": devolve o pedido montado para a aba registrar
 export default function PedidoDelivery({ aoPedir }) {
   const [loja, setLoja] = useState(null);
@@ -95,9 +94,9 @@ export default function PedidoDelivery({ aoPedir }) {
             {emReais(TAXA_DRONE_CENTAVOS)} · {String(resumo.pesoKg).replace('.', ',')} kg
           </Text>
         )}
-        <Text style={styles.rotulo}>Entregar no bairro</Text>
+        <Text style={styles.rotulo}>Endereço de entrega</Text>
         {endereco ? <Text style={styles.escolhido}>{endereco.nome}</Text> : null}
-        <BuscaDestino locais={ENDERECOS} aoEscolher={setEndereco} placeholder="Buscar bairro (ex.: Moema)" />
+        <BuscaDestino locais={[]} aoEscolher={setEndereco} comEndereco placeholder="Endereço de entrega (ex.: Avenida Ibirapuera, 2000)" />
         {avaliacao && resumo.quantidade > 0 ? <AvaliacaoPedido avaliacao={avaliacao} /> : null}
         <BotaoPrincipal texto="Pedir por drone" aoTocar={pedir} desligado={!podePedir} />
       </Secao>

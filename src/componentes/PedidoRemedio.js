@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { CARGA_MAXIMA_KG, FARMACIAS, MEDICAMENTOS } from '../dados/comercio';
-import { ENDERECOS } from '../dados/enderecos';
 import { FILIAIS } from '../dados/regiao';
 import { avaliarPedido } from '../regras/pedidos';
 import AvaliacaoPedido from './AvaliacaoPedido';
@@ -12,7 +11,7 @@ import Secao from './Secao';
 import { TEMA } from './tema';
 
 // Pedido de remédio (prioridade 3, Saúde), como o SADEC Saúde do site:
-// o medicamento, a farmácia de onde o drone retira e o bairro da entrega.
+// o medicamento, a farmácia de onde o drone retira e o endereço da entrega.
 export default function PedidoRemedio({ aoPedir }) {
   const [medicamento, setMedicamento] = useState(null);
   const [farmacia, setFarmacia] = useState(FARMACIAS[0].id);
@@ -49,9 +48,9 @@ export default function PedidoRemedio({ aoPedir }) {
         aoEscolher={setFarmacia}
       />
 
-      <Text style={styles.rotulo}>Entregar no bairro</Text>
+      <Text style={styles.rotulo}>Endereço de entrega</Text>
       {endereco ? <Text style={styles.escolhido}>{endereco.nome}</Text> : null}
-      <BuscaDestino locais={ENDERECOS} aoEscolher={setEndereco} placeholder="Buscar bairro (ex.: Saúde)" />
+      <BuscaDestino locais={[]} aoEscolher={setEndereco} comEndereco placeholder="Endereço de entrega (ex.: Rua Domingos de Morais, 500)" />
 
       {avaliacao ? <AvaliacaoPedido avaliacao={avaliacao} /> : null}
       {!medicamento ? <Text style={styles.dica}>Escolha um medicamento para continuar.</Text> : null}

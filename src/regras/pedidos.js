@@ -46,24 +46,25 @@ export function avaliarPedido({ coleta, destino, pesoKg = 0 }, filiais, cargaMax
   return { pode: true, motivo: null, paradas, bateria, distanciaKm: percurso.distanciaTotal };
 }
 
-// Endereços de entrega: um por bairro. Se o centro do bairro cair em cima de rodovia ou
-// trilho (onde o drone não pode pousar), o ponto vai para o lugar permitido mais perto,
-// procurando de 50 em 50 m, em 8 direções, até 500 m.
-export function enderecosDeEntrega(bairros, areas, vias, riscoNoPonto) {
+// Ponto de pouso para um endereço: se o ponto cair em cima de rodovia ou trilho (onde o drone
+// não pode pousar), vai para o lugar permitido mais perto, procurando de 50 em 50 m, em 8
+// direções, até 500 m. Usado nos bairros e nos endereços buscados (rua, avenida).
+export function pontoDePouso(ponto, areas, vias, riscoNoPonto) {
+  if (riscoNoPonto(ponto, areas, vias) !== 'proibido') return { x: ponto.x, y: ponto.y };
   const direcoes = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
-  return bairros.map((bairro) => {
-    let ponto = { x: bairro.x, y: bairro.y };
-    if (riscoNoPonto(ponto, areas, vias) === 'proibido') {
-      busca: for (let raio = 0.05; raio <= 0.5; raio += 0.05) {
-        for (const [dx, dy] of direcoes) {
-          const candidato = { x: bairro.x + dx * raio, y: bairro.y + dy * raio };
-          if (riscoNoPonto(candidato, areas, vias) !== 'proibido') {
-            ponto = candidato;
-            break busca;
-          }
-        }
-      }
+  for (let raio = 0.05; raio <= 0.5; raio += 0.05) {
+    for (const [dx, dy] of direcoes) {
+      const candidato = { x: ponto.x + dx * raio, y: ponto.y + dy * raio };
+      if (riscoNoPonto(candidato, areas, vias) !== 'proibido') return candidato;
     }
+  }
+  return { x: ponto.x, y: ponto.y };
+}
+
+// Endereços de entrega: um por bairro, num ponto onde o drone pode pousar (pontoDePouso)
+export function enderecosDeEntrega(bairros, areas, vias, riscoNoPonto) {
+  return bairros.map((bairro) => {
+    const ponto = pontoDePouso(bairro, areas, vias, riscoNoPonto);
     const id = `bairro-${bairro.nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, '-')}`;
     return { id, tipo: 'bairro', nome: bairro.nome, rotulo: bairro.nome, ...ponto };
   });

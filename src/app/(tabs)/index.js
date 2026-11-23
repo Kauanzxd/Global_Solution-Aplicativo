@@ -758,7 +758,7 @@ export default function Simular() {
               <Text style={styles.destinoNome}>{configuracao.destino.nome}</Text>
               {configuracao.destino.bairro ? <Text style={styles.destinoBairro}>{configuracao.destino.bairro}</Text> : null}
             </View>
-            <BuscaDestino locais={HOSPITAIS_DO_MAPA} aoEscolher={escolherDestino} />
+            <BuscaDestino locais={HOSPITAIS_DO_MAPA} aoEscolher={escolherDestino} comEndereco />
             {problemaDestino ? <Text style={styles.alerta}>{problemaDestino}</Text> : null}
           </Secao>
 
