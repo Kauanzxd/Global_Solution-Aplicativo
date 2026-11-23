@@ -114,13 +114,16 @@ export function criarVooDaRede(extra) {
 
 // Avança os extras um tique. Quem ainda espera na filial só desconta a espera; quando a
 // espera acaba, é a vez dele: avisa no rádio que está decolando.
+// "passoKm": um número (o mesmo passo para todos) ou uma lista com o passo de cada drone
+// (na câmera lenta, só o drone que está falando anda devagar).
 export function avancarRede(voos, passoKm, regiao) {
-  return voos.map((voo) => {
+  return voos.map((voo, indice) => {
+    const passo = Array.isArray(passoKm) ? passoKm[indice] : passoKm;
     if (voo.espera > 0) {
-      const espera = voo.espera - passoKm;
+      const espera = voo.espera - passo;
       return espera > 0 ? { ...voo, espera } : { ...voo, espera, mensagem: 'Decolando...' };
     }
-    return avancarVoo(voo, passoKm, [], regiao);
+    return avancarVoo(voo, passo, [], regiao);
   });
 }
 
@@ -176,6 +179,7 @@ function atualizarOutro(voo, outro) {
     chegada: voo.tempo || 0, // ...neste instante
     velocidade: { x: rumo.x * rapidez, y: rumo.y * rapidez },
     direita: { x: -rumo.y, y: rumo.x }, // a direita dele, no rumo dele
+    descendo: outro.situacao === 'descendo', // pousando: saindo da nossa altura
   };
   return {
     ...voo,

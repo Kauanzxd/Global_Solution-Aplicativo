@@ -967,6 +967,10 @@ function ameacaMaisUrgente(voo) {
   let maisUrgente = null;
 
   for (const obstaculo of voo.obstaculos || []) {
+    // Drone da rede descendo na vertical (pousando numa filial ou num ponto de entrega): está
+    // saindo da nossa altura e a bolha de altura resolve em segundos. Não é motivo para desviar
+    // (era o que acontecia com quem chegava atrás, na mesma filial: a "fila do pouso").
+    if (obstaculo.espelho && obstaculo.descendo) continue;
     const { distancia, r, v, t, futuro, menorDistancia, direcao } = preverAproximacao(voo, obstaculo);
     if (distancia > deteccaoDe(obstaculo)) continue; // o sensor ainda não enxerga
 
@@ -1017,7 +1021,8 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
   // Vai pela direita (regra do ar) quando: está bem de frente (sem lado melhor), quando
   // combinou com o outro drone, ou quando os dois estão sem rádio. O outro CONTA com isso.
   // Com um drone sem rádio imprevisível, foge para longe de onde ele vai estar.
-  const combinado = ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.comunicacao;
+  // ("combinado" só quando houve acordo pelo rádio de verdade)
+  const combinado = ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.comunicacao && Boolean(ameaca.obstaculo.acordo);
   const regraDoAr = ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.regraDoAr;
   if (tamanho < 1e-6 || combinado || regraDoAr) {
     fuga = { x: -direcao.y, y: direcao.x };

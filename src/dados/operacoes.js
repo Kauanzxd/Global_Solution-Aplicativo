@@ -17,7 +17,7 @@ export const OPERACAO_ENCHENTE = {
   plano: [
     '6 drones de 3 filiais (Itaquera, José Bonifácio e Cidade Líder): só elas alcançam a área com margem de bateria.',
     'Cada drone vai para um abrigo diferente: nenhum disputa o mesmo ponto de pouso.',
-    'Na mesma filial, as saídas são escalonadas (Itaquera: 0, 1,5 e 5 min; José Bonifácio: 0 e 2 min), para os drones não voarem colados na ida.',
+    'Na mesma filial, as saídas são escalonadas (Itaquera: 0, 1,5 e 9 min; José Bonifácio: 0 e 6 min), para os drones não voarem colados.',
     'Todos são prioridade 2 (emergência). Quando duas rotas se cruzam, eles conversam pelo rádio: desvia quem tem mais bateria.',
     'O SADEC-14 estava reservado para um pedido comercial que ainda não tinha decolado: o pedido comercial foi reagendado e o drone foi para a operação.',
   ],
@@ -31,16 +31,17 @@ export const OPERACAO_ENCHENTE = {
   ],
   // Cada drone: de qual filial sai, para qual abrigo, o que leva, a bateria e quantos
   // segundos espera na filial (saídas escalonadas). O primeiro é o drone "principal" da tela.
-  // Os abrigos e as esperas foram escolhidos testando as 720 distribuições possíveis: com
-  // estas, as decolagens saem uma depois da outra e há 2 cruzamentos de verdade (rotas com
-  // rumos diferentes): SADEC-12 × 14 no meio da ida e SADEC-11 × 13 na volta.
+  // Os abrigos e as esperas foram escolhidos testando as 720 distribuições possíveis (com
+  // várias esperas): com estes, as decolagens saem uma depois da outra e há 2 cruzamentos de
+  // verdade, quase de frente: SADEC-11 voltando × SADEC-15 indo, e SADEC-13 indo × SADEC-14
+  // voltando. Nos dois, o drone vazio (voltando) desvia para o que leva os suprimentos.
   drones: [
-    { idDrone: 'SADEC-11', filial: 'F-03', abrigo: 'abrigo-helena', suprimento: 'Água potável (5 L)', bateria: 80, esperaS: 0 },
-    { idDrone: 'SADEC-12', filial: 'F-03', abrigo: 'abrigo-romano', suprimento: 'Kit de primeiros socorros', bateria: 70, esperaS: 90 },
-    { idDrone: 'SADEC-13', filial: 'F-03', abrigo: 'abrigo-curuca', suprimento: 'Medicamentos básicos para abrigo', bateria: 75, esperaS: 300 },
-    { idDrone: 'SADEC-14', filial: 'F-15', abrigo: 'abrigo-meninas', suprimento: 'Água potável (5 L)', bateria: 80, esperaS: 0 },
-    { idDrone: 'SADEC-15', filial: 'F-15', abrigo: 'abrigo-martinho', suprimento: 'Kit de primeiros socorros', bateria: 70, esperaS: 120 },
-    { idDrone: 'SADEC-16', filial: 'F-07', abrigo: 'abrigo-itaim', suprimento: 'Medicamentos básicos para abrigo', bateria: 95, esperaS: 0 },
+    { idDrone: 'SADEC-11', filial: 'F-03', abrigo: 'abrigo-romano', suprimento: 'Água potável (5 L)', bateria: 80, esperaS: 0 },
+    { idDrone: 'SADEC-12', filial: 'F-03', abrigo: 'abrigo-martinho', suprimento: 'Kit de primeiros socorros', bateria: 70, esperaS: 90 },
+    { idDrone: 'SADEC-13', filial: 'F-03', abrigo: 'abrigo-itaim', suprimento: 'Medicamentos básicos para abrigo', bateria: 75, esperaS: 540 },
+    { idDrone: 'SADEC-14', filial: 'F-15', abrigo: 'abrigo-curuca', suprimento: 'Água potável (5 L)', bateria: 80, esperaS: 0 },
+    { idDrone: 'SADEC-15', filial: 'F-15', abrigo: 'abrigo-meninas', suprimento: 'Kit de primeiros socorros', bateria: 70, esperaS: 360 },
+    { idDrone: 'SADEC-16', filial: 'F-07', abrigo: 'abrigo-helena', suprimento: 'Medicamentos básicos para abrigo', bateria: 95, esperaS: 0 },
   ],
 };
 
