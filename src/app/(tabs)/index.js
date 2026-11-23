@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BuscaDestino from '../../componentes/BuscaDestino';
 import Cabecalho from '../../componentes/Cabecalho';
@@ -156,6 +156,13 @@ const VELOCIDADE_CONVERSA = 0.02;
 // Escala do tráfego numa operação: a bolha de segurança (e o desvio) fica com 3,5% da
 // largura da visão, para aparecer com a câmera mostrando a região inteira
 const BOLHA_NA_TELA = 0.035;
+
+// Altura aproximada da barra de abas (Simular / Pedidos), em px: o mapa da tela larga
+// precisa caber acima dela
+const BARRA_DE_ABAS = 50;
+
+// Para o useSyncExternalStore: não há nada para "ouvir", só saber se já estamos no aparelho
+const nadaParaOuvir = () => () => {};
 const BOLHA_DRONE_KM = 0.1;
 const DURACAO_CAMERA_LENTA_MS = 3500;
 // Mensagens de rotina (decolar, voar, entregar, voltar) e avisos informativos (bolha de
@@ -311,6 +318,18 @@ export default function Simular() {
   const subirAoMapa = useRef(false); // pedido de subir a tela, feito no botão de iniciar
   const margens = useSafeAreaInsets(); // espaço da barra de status (e do entalhe) do celular
 
+  // Tela larga (computador ou tablet deitado): o mapa fica fixo à esquerda, do tamanho da
+  // altura da tela, e o resto vira um painel que rola à direita. No celular, tudo numa coluna.
+  // O site é montado primeiro no servidor, que não sabe o tamanho da tela: lá (e na primeira
+  // pintura no navegador) é sempre a coluna única; a tela larga entra logo depois, já no
+  // navegador. Sem isso, o HTML do servidor não bate com o do navegador (erro de hidratação).
+  const noAparelho = useSyncExternalStore(nadaParaOuvir, () => true, () => false);
+  const { width: larguraJanela, height: alturaJanela } = useWindowDimensions();
+  const larga = noAparelho && larguraJanela >= 900 && larguraJanela > alturaJanela;
+  const espacoLivre = larguraJanela - 2 * 16 - 24; // tira as margens dos lados e o vão do meio
+  const ladoMapa = Math.max(320, Math.min(alturaJanela - margens.top - 16 - 16 - BARRA_DE_ABAS, espacoLivre - 420));
+  const larguraPainel = Math.min(720, espacoLivre - ladoMapa);
+
   // Pedidos feitos na aba Pedidos: um deles pode chegar aqui para virar o voo
   const { pedidoParaVoar, setPedidoParaVoar, atualizarStatus } = usePedidos();
 
@@ -346,7 +365,9 @@ export default function Simular() {
     if (!comecouOVoo || !subirAoMapa.current) return;
     subirAoMapa.current = false;
     requestAnimationFrame(() => {
-      if (rolagem.current) rolagem.current.scrollTo({ y: Math.max(topoDoMapa.current - margens.top - 8, 0), animated: false });
+      // Na tela larga o mapa já está sempre à vista: o painel só volta ao topo (o rádio)
+      const destino = larga ? 0 : Math.max(topoDoMapa.current - margens.top - 8, 0);
+      if (rolagem.current) rolagem.current.scrollTo({ y: destino, animated: false });
     });
   }, [comecouOVoo]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -674,51 +695,53 @@ export default function Simular() {
     </Secao>
   ) : null;
 
-  return (
-    <ScrollView ref={rolagem} style={styles.tela} contentContainerStyle={[styles.conteudo, { paddingTop: margens.top + 20 }]}>
-      <Cabecalho titulo="Simular voo" subtitulo="Monte uma situação e veja o drone em ação" />
+  // O mapa (com a medida de onde ele começa, para a tela subir até ele ao iniciar)
+  const blocoMapa = (
+    <View style={larga ? null : styles.areaMapa} onLayout={(evento) => (topoDoMapa.current = evento.nativeEvent.layout.y)}>
+      <Mapa
+        coleta={comColeta ? configuracao.coleta : undefined}
+        pontosEntrega={configuracao.operacao ? configuracao.operacao.abrigos : []}
+        destino={configuracao.destino}
+        origem={voo ? voo.hub || voo.origem : origem}
+        centro={voo !== null && vistaOperacao ? vistaOperacao.centro : voo === null && foco ? foco.centro : undefined}
+        mostrarAlcance={mostrarAlcance}
+        drone={posicao}
+        desvio={desvio}
+        altitude={altitude}
+        paraquedas={paraquedas}
+        vento={voo ? voo.vento : null}
+        incerteza={voo ? incertezaDoVoo(voo) : 0}
+        // Os drones da rede já aparecem de verdade no mapa (outrosDrones): o "obstáculo" que o
+        // nosso drone usa para calcular o desvio deles não é desenhado, para não ficar duplicado
+        obstaculos={
+          voo
+            ? (voo.obstaculos || [])
+                .filter((obstaculo) => !outros.some((outro) => outro.idDrone === obstaculo.id))
+                .map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo))
+            : []
+        }
+        vista={vista}
+        marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, paradas, rotasDosOutros) : []}
+        // O drone principal sempre mostra o nome de rádio (o mesmo do rádio: SADEC-01, ou o
+        // da operação)
+        nomeDrone={(voo && voo.idDrone) || (configuracao.operacao ? configuracao.operacao.drones[0].idDrone : 'SADEC-01')}
+        outrosDrones={outros.map((outro, indice) => ({
+          id: outro.idDrone,
+          x: posicaoNaRota(outro.origem, outro.destino, outro.km).x,
+          y: posicaoNaRota(outro.origem, outro.destino, outro.km).y,
+          altitude: outro.espera > 0 ? 0 : altitudeDoVoo(outro),
+          cor: (extrasPlanejados[indice] && extrasPlanejados[indice].cor) || DRONES_DA_REDE[indice % DRONES_DA_REDE.length].cor,
+          rota: { origem: outro.hub || outro.origem, destino: outro.destinoFinal || outro.destino },
+          comParaquedas: Boolean(outro.paraquedasAberto) && altitudeDoVoo(outro) > 0,
+        }))}
+        aoTocar={voo === null ? tocarNoMapa : undefined}
+      />
+    </View>
+  );
 
-      <View style={styles.areaMapa} onLayout={(evento) => (topoDoMapa.current = evento.nativeEvent.layout.y)}>
-        <Mapa
-          coleta={comColeta ? configuracao.coleta : undefined}
-          pontosEntrega={configuracao.operacao ? configuracao.operacao.abrigos : []}
-          destino={configuracao.destino}
-          origem={voo ? voo.hub || voo.origem : origem}
-          centro={voo !== null && vistaOperacao ? vistaOperacao.centro : voo === null && foco ? foco.centro : undefined}
-          mostrarAlcance={mostrarAlcance}
-          drone={posicao}
-          desvio={desvio}
-          altitude={altitude}
-          paraquedas={paraquedas}
-          vento={voo ? voo.vento : null}
-          incerteza={voo ? incertezaDoVoo(voo) : 0}
-          // Os drones da rede já aparecem de verdade no mapa (outrosDrones): o "obstáculo" que o
-          // nosso drone usa para calcular o desvio deles não é desenhado, para não ficar duplicado
-          obstaculos={
-            voo
-              ? (voo.obstaculos || [])
-                  .filter((obstaculo) => !outros.some((outro) => outro.idDrone === obstaculo.id))
-                  .map((obstaculo) => desenhoObstaculo(obstaculo, voo.tempo))
-              : []
-          }
-          vista={vista}
-          marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, paradas, rotasDosOutros) : []}
-          // O drone principal sempre mostra o nome de rádio (o mesmo do rádio: SADEC-01, ou o
-          // da operação)
-          nomeDrone={(voo && voo.idDrone) || (configuracao.operacao ? configuracao.operacao.drones[0].idDrone : 'SADEC-01')}
-          outrosDrones={outros.map((outro, indice) => ({
-            id: outro.idDrone,
-            x: posicaoNaRota(outro.origem, outro.destino, outro.km).x,
-            y: posicaoNaRota(outro.origem, outro.destino, outro.km).y,
-            altitude: outro.espera > 0 ? 0 : altitudeDoVoo(outro),
-            cor: (extrasPlanejados[indice] && extrasPlanejados[indice].cor) || DRONES_DA_REDE[indice % DRONES_DA_REDE.length].cor,
-            rota: { origem: outro.hub || outro.origem, destino: outro.destinoFinal || outro.destino },
-            comParaquedas: Boolean(outro.paraquedasAberto) && altitudeDoVoo(outro) > 0,
-          }))}
-          aoTocar={voo === null ? tocarNoMapa : undefined}
-        />
-      </View>
-
+  // Todo o resto: rádio, velocidade, legenda, montagem ou painel do voo e resumos
+  const blocoResto = (
+    <>
       {/* Durante o voo: o rádio logo abaixo do mapa, com as 5 últimas mensagens (em qualquer simulação) */}
       {voo !== null ? <LogDoRadio mensagens={radio} quantas={5} /> : null}
 
@@ -967,6 +990,29 @@ export default function Simular() {
       {/* Versão publicada (o código do commit, colocado na hora de gerar o site): serve para
           conferir no celular se a página aberta é a versão mais nova */}
       {VERSAO ? <Text style={styles.versao}>versão {VERSAO}</Text> : null}
+    </>
+  );
+
+  // Tela larga: mapa fixo à esquerda e painel rolando à direita, os dois centralizados
+  if (larga) {
+    return (
+      <View style={[styles.tela, styles.telaLarga, { paddingTop: margens.top + 16 }]}>
+        <View style={{ width: ladoMapa }}>{blocoMapa}</View>
+        <ScrollView ref={rolagem} style={{ width: larguraPainel }} contentContainerStyle={styles.conteudoLargo}>
+          <Cabecalho titulo="Simular voo" subtitulo="Monte uma situação e veja o drone em ação" />
+          {blocoResto}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView ref={rolagem} style={styles.tela} contentContainerStyle={[styles.conteudo, { paddingTop: margens.top + 20 }]}>
+      <Cabecalho titulo="Simular voo" subtitulo="Monte uma situação e veja o drone em ação" />
+
+      {blocoMapa}
+
+      {blocoResto}
     </ScrollView>
   );
 }
@@ -983,6 +1029,17 @@ const styles = StyleSheet.create({
   },
   areaMapa: {
     marginTop: 20,
+  },
+  // Tela larga: as duas colunas lado a lado, no meio da tela
+  telaLarga: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  conteudoLargo: {
+    paddingBottom: 32,
   },
   linhaVelocidade: {
     marginTop: 10,

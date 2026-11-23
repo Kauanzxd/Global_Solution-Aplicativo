@@ -135,6 +135,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     // paddingTop vem da safe area (margens.top), no próprio componente
     paddingBottom: 32,
+    // Numa tela larga (computador), os formulários não esticam até as bordas: ficam no meio,
+    // com uma largura boa de ler e preencher
+    width: '100%',
+    maxWidth: 960,
+    alignSelf: 'center',
   },
   linhaConta: {
     flexDirection: 'row',
