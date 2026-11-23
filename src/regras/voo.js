@@ -367,9 +367,14 @@ function entregar(voo, passoKm, regiao) {
   // se a bateria cobrir a entrega e, depois, a ida até uma zona controlada (com a margem).
   if (voo.etapa === 'coleta') return decolarComOrgao(voo, local, tem, regiao);
 
-  const hub = filialMaisProxima(local, regiao.zonas);
+  // Volta para a filial de onde saiu (a decolagem conferiu a bateria contando essa volta).
+  // Se a bateria não der (gastou mais no caminho), vai para a filial mais perto.
+  const minhaFilial = voo.hub && regiao.zonas.find((zona) => zona.ehHub && zona.x === voo.hub.x && zona.y === voo.hub.y);
+  const daMinhaFilial = minhaFilial && tem >= bateriaParaSairEChegar(distanciaKm(local, minhaFilial));
+  const hub = daMinhaFilial ? minhaFilial : filialMaisProxima(local, regiao.zonas);
 
-  // Para onde vai: a filial mais próxima, se der; senão, a zona mais perto que dá para alcançar
+  // Para onde vai: a filial (a de origem, ou a mais próxima), se der; senão, a zona mais perto
+  // que dá para alcançar
   let alvo = null;
   if (tem >= bateriaParaSairEChegar(distanciaKm(local, hub))) {
     alvo = hub;
