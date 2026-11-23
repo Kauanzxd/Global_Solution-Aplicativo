@@ -977,7 +977,7 @@ function ameacaMaisUrgente(voo) {
     // saindo da nossa altura e a bolha de altura resolve em segundos. Não é motivo para desviar
     // (era o que acontecia com quem chegava atrás, na mesma filial: a "fila do pouso").
     if (obstaculo.espelho && obstaculo.descendo) continue;
-    const { distancia, r, v, t, futuro, menorDistancia, direcao } = preverAproximacao(voo, obstaculo);
+    const { distancia, r, v, t, futuro, menorDistancia, direcao, velocidadeObstaculo } = preverAproximacao(voo, obstaculo);
     if (distancia > deteccaoDe(obstaculo)) continue; // o sensor ainda não enxerga
 
     // Outro drone com acordo de que ELE desvia: confiamos no combinado e seguimos reto,
@@ -1004,13 +1004,13 @@ function ameacaMaisUrgente(voo) {
     // Regra de distância (só para os imprevisíveis): perto demais e chegando mais perto
     const seAproximando = r.x * v.x + r.y * v.y < 0;
     if (imprevisivel && distancia < bolha && seAproximando && (!maisUrgente || 0 < maisUrgente.t)) {
-      maisUrgente = { obstaculo, t: 0, futuro: r, distancia, direcao };
+      maisUrgente = { obstaculo, t: 0, futuro: r, distancia, direcao, velocidadeObstaculo };
       continue;
     }
 
     // 3. Vai entrar na bolha nos próximos 60 s? É uma ameaça. Fica com a mais próxima no tempo.
     if (t <= HORIZONTE_PREVISAO_S && menorDistancia < bolha && (!maisUrgente || t < maisUrgente.t)) {
-      maisUrgente = { obstaculo, t, futuro, distancia, direcao };
+      maisUrgente = { obstaculo, t, futuro, distancia, direcao, velocidadeObstaculo };
     }
   }
   return maisUrgente;
@@ -1037,11 +1037,22 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
     tamanho = 1;
   }
 
-  // Drone imprevisível (zigue-zague): o lado do desvio fica TRAVADO do começo ao fim.
-  // Sem isso, o balanço dele faria o nosso drone trocar de lado a cada instante.
+  // Bando de pássaros cruzando a rota: passa POR TRÁS dele, para o lado de onde ele vem
+  // (quando o drone chegar lá, o bando já passou). Fugir para o lado para onde ele vai faria
+  // o drone voar junto com o bando, sempre dentro da bolha, com alertas repetidos.
+  const cruzando = ameaca.obstaculo.tipo === 'passaros' && ameaca.velocidadeObstaculo;
+  if (cruzando) {
+    const direita = { x: -direcao.y, y: direcao.x };
+    const paraDireita = ameaca.velocidadeObstaculo.x * direita.x + ameaca.velocidadeObstaculo.y * direita.y > 0;
+    fuga = paraDireita ? { x: -direita.x, y: -direita.y } : direita;
+    tamanho = 1;
+  }
+
+  // Drone imprevisível (zigue-zague) ou bando cruzando: o lado do desvio fica TRAVADO do
+  // começo ao fim. Sem isso, o balanço deles faria o nosso drone trocar de lado a cada instante.
   const errante = ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.comportamento === 'errante';
   let ladoDesvio = voo.ladoDesvio;
-  if (errante) {
+  if (errante || cruzando) {
     const ladoAgora = { x: fuga.x / tamanho, y: fuga.y / tamanho };
     if (!ladoDesvio) ladoDesvio = ladoAgora; // primeiro tique do desvio: escolhe o lado
     fuga = ladoDesvio;
@@ -1083,7 +1094,7 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
     km: 0,
     hodometro: (voo.hodometro || 0) + passo,
     desviandoObstaculo: true,
-    ladoDesvio: errante ? ladoDesvio : voo.ladoDesvio,
+    ladoDesvio: errante || cruzando ? ladoDesvio : voo.ladoDesvio,
     mensagem,
   };
 }
