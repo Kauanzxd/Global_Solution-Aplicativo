@@ -29,10 +29,12 @@ export async function POST(request) {
   if (!texto) return new Response('Texto vazio', { status: 400 });
   const voz = VOZES.includes(corpo.voz) ? corpo.voz : VOZES[0];
 
-  // SSML: qual voz fala e em que ritmo (+25%: a fala rápida de rádio)
+  // SSML: qual voz fala, em que ritmo (+35%: a fala rápida de rádio) e sem o silêncio que o
+  // Azure põe no começo e no fim (0,4 s a menos em cada fala: a voz acompanha melhor o mapa)
   const ssml =
-    `<speak version="1.0" xml:lang="pt-BR"><voice name="${voz}">` +
-    `<prosody rate="+25%">${escaparXml(texto)}</prosody></voice></speak>`;
+    `<speak version="1.0" xml:lang="pt-BR" xmlns:mstts="https://www.w3.org/2001/mstts"><voice name="${voz}">` +
+    '<mstts:silence type="Leading-exact" value="0ms"/><mstts:silence type="Tailing-exact" value="0ms"/>' +
+    `<prosody rate="+35%">${escaparXml(texto)}</prosody></voice></speak>`;
 
   const resposta = await fetch(`https://${regiao}.tts.speech.microsoft.com/cognitiveservices/v1`, {
     method: 'POST',

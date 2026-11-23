@@ -137,15 +137,18 @@ const VELOCIDADES = [
   { valor: 2, rotulo: '2×' },
 ];
 const VELOCIDADE_PADRAO = 0.5;
-const VELOCIDADE_OPERACAO = 0.25; // operação de emergência: 6 drones ao mesmo tempo
+const VELOCIDADE_OPERACAO = 0.3; // operação de emergência: 6 drones (calculada com a voz do rádio)
 
 // Mensagens que mudam só nos números ("Drone a 225 m" → "a 213 m") contam como a mesma
 const semNumeros = (texto) => (texto || '').replace(/[\d.,]+/g, '#');
 
 // Câmera lenta por drone: quando um drone reage a um evento (pane, GPS, conversa com outro
-// drone...), SÓ ELE fica bem mais lento enquanto a voz conta o que está acontecendo (com a
-// voz desligada, por alguns segundos). Os outros seguem na velocidade normal.
+// drone...), SÓ ELE fica mais lento; os outros seguem na velocidade normal.
+//   - enquanto o evento dele espera a vez na voz, ele quase para (a ação espera a fala);
+//   - enquanto a voz conta, ele anda em câmera lenta (a ação acontece junto com a fala);
+//   - com a voz desligada, fica em câmera lenta por alguns segundos.
 const VELOCIDADE_CAMERA_LENTA = 0.1;
+const VELOCIDADE_ESPERANDO_A_VEZ = 0.005;
 const DURACAO_CAMERA_LENTA_MS = 3500;
 // Mensagens de rotina (decolar, voar, entregar, voltar) e avisos informativos (bolha de
 // altura) não são eventos: não ligam a câmera lenta
@@ -311,7 +314,7 @@ export default function Simular() {
     // Numa operação, a Central anuncia a ocorrência e quantos drones foram acionados
     const operacao = configuracao.operacao;
     const abertura = operacao
-      ? `${operacao.titulo}. ${operacao.drones.length} drones acionados, saídas escalonadas por filial.`
+      ? `${operacao.titulo}. ${operacao.drones.length} drones acionados.`
       : 'Simulação iniciada';
     voz.falar([{ id: `central-${Date.now()}`, nome: 'Central SADEC', cor: TEMA.marca, texto: abertura, evento: false }]);
     // A tela sobe até o mapa logo depois que o painel do voo aparecer (veja o useEffect abaixo)
@@ -508,12 +511,16 @@ export default function Simular() {
     const relogio = setInterval(() => {
       let principal = vooRef.current;
       let rede = outrosRef.current;
-      // O passo de cada drone: na velocidade escolhida, ou em câmera lenta (0,1×) se ESTE
-      // drone está reagindo a um evento (a voz contando, ou nos segundos depois do evento)
+      // O passo de cada drone: na velocidade escolhida, ou mais devagar se ESTE drone está
+      // reagindo a um evento (veja VELOCIDADE_CAMERA_LENTA). Nunca mais rápido que a escolhida.
       const passos = [principal, ...rede].map((drone) => {
         const nome = drone.idDrone || 'SADEC-01';
-        const reagindo = Date.now() < (cameraLentaAte.current[nome] || 0) || voz.contandoEventoDe(nome);
-        const velocidade = reagindo ? Math.min(velocidadeRef.current, VELOCIDADE_CAMERA_LENTA) : velocidadeRef.current;
+        const naVoz = voz.eventoNaVoz(nome);
+        let velocidade = velocidadeRef.current;
+        if (naVoz === 'esperando') velocidade = Math.min(velocidade, VELOCIDADE_ESPERANDO_A_VEZ);
+        else if (naVoz === 'falando' || Date.now() < (cameraLentaAte.current[nome] || 0)) {
+          velocidade = Math.min(velocidade, VELOCIDADE_CAMERA_LENTA);
+        }
         return (PASSO_KM * velocidade) / DECISOES_POR_TIQUE;
       });
       for (let i = 0; i < DECISOES_POR_TIQUE; i++) {

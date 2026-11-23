@@ -5,9 +5,8 @@ import { chiadoDeAbertura, decodificarAudio, tocarComoRadio } from './somDeRadio
 
 // Voz do rádio: lê em voz alta as mensagens dos drones (expo-speech, a voz do próprio
 // celular ou navegador). As mensagens entram numa fila e são lidas uma de cada vez.
-// Enquanto a voz conta um EVENTO de um drone (pane, GPS, conversa com outro drone...),
-// "contandoEventoDe(nome)" responde true: a tela deixa só esse drone em câmera lenta até a
-// fala terminar.
+// Enquanto a voz conta (ou ainda vai contar) um EVENTO de um drone (pane, GPS, conversa com
+// outro drone...), "eventoNaVoz(nome)" avisa a tela, que segura esse drone até a fala.
 
 const IDIOMA = 'pt-BR';
 const RITMO = 1.4; // bem mais rápido que o normal, como a fala de rádio (e para não atrasar em relação ao mapa)
@@ -281,14 +280,14 @@ export default function useVozDoRadio({ aoMostrar }) {
     if (!atual.current) proxima();
   };
 
-  // A voz está contando (ou ainda vai contar) um evento deste drone? A tela usa isso para
-  // deixar só ele em câmera lenta até a fala terminar.
-  const contandoEventoDe = (nome) =>
-    ligadaRef.current &&
-    Boolean(
-      (atual.current && atual.current.nome === nome && atual.current.evento) ||
-        fila.current.some((item) => item.nome === nome && item.evento)
-    );
+  // Um evento deste drone está na voz? 'falando' (a voz está contando agora), 'esperando'
+  // (ainda vai contar: está na fila) ou null. A tela usa isso para que a ação no mapa
+  // aconteça junto com a fala: esperando, o drone quase para; falando, anda em câmera lenta.
+  const eventoNaVoz = (nome) => {
+    if (!ligadaRef.current) return null;
+    if (atual.current && atual.current.nome === nome && atual.current.evento) return 'falando';
+    return fila.current.some((item) => item.nome === nome && item.evento) ? 'esperando' : null;
+  };
 
   // Cala a voz e esvazia a fila (nova simulação, interromper, desligar a voz)
   const parar = () => {
@@ -309,5 +308,5 @@ export default function useVozDoRadio({ aoMostrar }) {
   }, [ligada]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => parar, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { ligada, setLigada, falar, parar, contandoEventoDe };
+  return { ligada, setLigada, falar, parar, eventoNaVoz };
 }
