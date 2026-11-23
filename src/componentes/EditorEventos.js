@@ -11,26 +11,51 @@ let proximoId = 1;
 // A lista de eventos da simulação: os cartões + o botão de adicionar.
 // eventos: a lista atual | aoMudar(novaLista): devolve a lista nova para a tela
 // distanciaVolta e kmColeta são opcionais (missão de órgãos): veja a LinhaDoTempo
-export default function EditorEventos({ eventos, distanciaIda, distanciaVolta = distanciaIda, kmColeta, aoMudar }) {
+// "drones" (opcional): com vários drones no ar, [{ nome, distanciaIda, distanciaVolta }], o
+//   principal primeiro. Cada evento acontece no drone escolhido ("drone": o nome de rádio),
+//   no km da rota DELE; eventos em drones diferentes acontecem ao mesmo tempo.
+export default function EditorEventos({ eventos, distanciaIda, distanciaVolta = distanciaIda, kmColeta, drones = [], aoMudar }) {
   const [escolhendo, setEscolhendo] = useState(false); // aberta a grade de tipos?
+  const principal = drones[0] ? drones[0].nome : undefined;
+
+  // As distâncias da rota do drone de um evento (sem drone escolhido: o principal)
+  const rotaDe = (nome) => {
+    const drone = drones.find((opcao) => opcao.nome === nome);
+    return drone && nome !== principal
+      ? { distanciaIda: drone.distanciaIda, distanciaVolta: drone.distanciaVolta, kmColeta: undefined }
+      : { distanciaIda, distanciaVolta, kmColeta };
+  };
 
   // Adiciona um evento do tipo escolhido, no meio da ida, com os valores iniciais dele
   const adicionar = (tipo) => {
     const kmInicial = Number((distanciaIda / 2).toFixed(1));
-    aoMudar([...eventos, { id: proximoId++, tipo: tipo.tipo, km: kmInicial, ...tipo.padrao }]);
+    aoMudar([...eventos, { id: proximoId++, tipo: tipo.tipo, km: kmInicial, drone: principal, ...tipo.padrao }]);
     setEscolhendo(false);
   };
 
-  // Muda um campo de UM evento (o de id igual) e deixa os outros como estão
+  // Muda um campo de UM evento (o de id igual) e deixa os outros como estão. Trocou o drone:
+  // o km vai para o meio da ida do novo drone (a rota dele tem outro tamanho)
   const mudarEvento = (id, campo, valor) => {
-    aoMudar(eventos.map((evento) => (evento.id === id ? { ...evento, [campo]: valor } : evento)));
+    aoMudar(
+      eventos.map((evento) => {
+        if (evento.id !== id) return evento;
+        if (campo !== 'drone') return { ...evento, [campo]: valor };
+        return { ...evento, drone: valor, km: Number((rotaDe(valor).distanciaIda / 2).toFixed(1)) };
+      })
+    );
   };
 
   const remover = (id) => aoMudar(eventos.filter((evento) => evento.id !== id));
 
   return (
     <View>
-      <LinhaDoTempo eventos={eventos} distanciaIda={distanciaIda} distanciaVolta={distanciaVolta} kmColeta={kmColeta} />
+      {/* A linha do tempo é a da rota do principal: mostra só os eventos dele */}
+      <LinhaDoTempo
+        eventos={eventos.filter((evento) => !evento.drone || evento.drone === principal)}
+        distanciaIda={distanciaIda}
+        distanciaVolta={distanciaVolta}
+        kmColeta={kmColeta}
+      />
 
       {eventos.length === 0 ? (
         <Text style={styles.vazio}>Nenhum evento: o drone faz a missão sem imprevistos.</Text>
@@ -41,9 +66,8 @@ export default function EditorEventos({ eventos, distanciaIda, distanciaVolta = 
           key={evento.id}
           evento={evento}
           numero={indice + 1}
-          distanciaIda={distanciaIda}
-          distanciaVolta={distanciaVolta}
-          kmColeta={kmColeta}
+          {...rotaDe(evento.drone)}
+          drones={drones.map((drone) => drone.nome)}
           aoMudar={(campo, valor) => mudarEvento(evento.id, campo, valor)}
           aoRemover={() => remover(evento.id)}
         />

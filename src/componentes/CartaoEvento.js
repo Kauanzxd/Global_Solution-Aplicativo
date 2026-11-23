@@ -38,7 +38,9 @@ function Linha({ rotulo, children }) {
 // "numero": a posição do evento na lista (1, 2, 3...), o mesmo número que aparece no mapa
 // "distanciaVolta" (opcional): tamanho da volta; sem ele, a volta é igual à ida
 // "kmColeta" (opcional): missão de órgãos, km em que o drone pousa para coletar o órgão
-export default function CartaoEvento({ evento, numero, distanciaIda, distanciaVolta = distanciaIda, kmColeta, aoMudar, aoRemover }) {
+// "drones" (opcional): com vários drones, os nomes de rádio para escolher em qual deles o
+//   evento acontece (os km e as distâncias passam a ser os da rota desse drone)
+export default function CartaoEvento({ evento, numero, distanciaIda, distanciaVolta = distanciaIda, kmColeta, drones = [], aoMudar, aoRemover }) {
   const tipo = tipoDoEvento(evento.tipo);
   const etapa = etapaDoKm(evento.km, distanciaIda, distanciaVolta, kmColeta);
   const kmMaximo = Number((distanciaIda + distanciaVolta).toFixed(1)); // ida + volta
@@ -51,11 +53,18 @@ export default function CartaoEvento({ evento, numero, distanciaIda, distanciaVo
         </View>
         <Text style={styles.nome}>{tipo.rotulo}</Text>
         <Text style={[styles.etapa, { color: etapa.cor, borderColor: etapa.cor }]}>{etapa.texto}</Text>
-        <Pressable onPress={aoRemover} hitSlop={10} style={styles.remover}>
+        <Pressable onPress={aoRemover} hitSlop={10} style={styles.remover} accessibilityRole="button" accessibilityLabel={`Remover o evento ${numero}`}>
           <Text style={styles.textoRemover}>×</Text>
         </Pressable>
       </View>
       <Text style={styles.descricao}>{tipo.descricao}</Text>
+
+      {/* Com vários drones: em qual deles o evento acontece */}
+      {drones.length > 1 ? (
+        <Linha rotulo="Em qual drone">
+          <Opcoes opcoes={drones.map((nome) => ({ valor: nome, rotulo: nome }))} valor={evento.drone} aoEscolher={(nome) => aoMudar('drone', nome)} />
+        </Linha>
+      ) : null}
 
       <Linha rotulo="Acontece no km">
         <Contador

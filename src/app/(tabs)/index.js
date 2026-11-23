@@ -212,9 +212,12 @@ function problemaDoDestino(configuracao, origem) {
 // DIREITA do sentido do voo: ficam duas "faixas", como uma estrada de mão dupla.
 const AFASTAMENTO_FAIXA_KM = 0.35;
 
-function marcadoresDosEventos(eventos, paradas) {
+// "rotasDosOutros" (opcional): nome de rádio → paradas da rota de outro drone; o evento de
+// um outro drone fica marcado na rota dele (o número continua o mesmo do cartão)
+function marcadoresDosEventos(eventos, paradasDoPrincipal, rotasDosOutros = {}) {
   return eventos
     .map((evento, indice) => {
+      const paradas = rotasDosOutros[evento.drone] || paradasDoPrincipal;
       // Procura em qual trecho o km cai
       let resto = evento.km;
       for (let i = 1; i < paradas.length; i++) {
@@ -492,7 +495,6 @@ export default function Simular() {
   const distanciaIda = tamanhoDe(paradas.slice(0, -1));
   const distanciaVolta = distanciaKm(paradas[paradas.length - 2], paradas[paradas.length - 1]);
   const kmColeta = comColeta ? distanciaKm(origem, configuracao.coleta) : undefined;
-  const eventos = eventosParaOVoo(configuracao.eventos, distanciaIda + distanciaVolta);
 
   // Os outros drones que vão voar junto: rotas que cruzam a ida do principal
   // (numa operação de emergência, são os outros drones que a Central acionou)
@@ -511,6 +513,32 @@ export default function Simular() {
         HOSPITAIS_DO_MAPA,
         comColeta ? [configuracao.destino, configuracao.coleta] : [configuracao.destino]
       );
+
+  // Os drones da missão (o principal primeiro), para o editor de eventos: cada evento
+  // acontece no drone escolhido, no km da rota dele (a volta é para a própria filial)
+  const nomePrincipal = configuracao.operacao ? configuracao.operacao.drones[0].idDrone : 'SADEC-01';
+  const dronesDaMissao = [
+    { nome: nomePrincipal, distanciaIda, distanciaVolta },
+    ...extrasPlanejados.map((extra) => {
+      const ida = distanciaKm(extra.origem, extra.destino);
+      return { nome: extra.idDrone, distanciaIda: ida, distanciaVolta: ida };
+    }),
+  ];
+  // Os eventos de cada drone. O principal fica com os dele e com os de algum drone que saiu
+  // da missão (por exemplo, quando diminuem os "outros drones no ar")
+  const nomesDosOutros = dronesDaMissao.slice(1).map((drone) => drone.nome);
+  const eventos = eventosParaOVoo(
+    configuracao.eventos.filter((evento) => !nomesDosOutros.includes(evento.drone)),
+    distanciaIda + distanciaVolta
+  );
+  // A rota de cada outro drone (ida e volta para a própria filial), para marcar os eventos dele
+  const rotasDosOutros = Object.fromEntries(extrasPlanejados.map((extra) => [extra.idDrone, [extra.origem, extra.destino, extra.origem]]));
+  const eventosDosOutros = Object.fromEntries(
+    dronesDaMissao.slice(1).map((drone) => [
+      drone.nome,
+      eventosParaOVoo(configuracao.eventos.filter((evento) => evento.drone === drone.nome), drone.distanciaIda + drone.distanciaVolta),
+    ])
+  );
 
   // O relógio lê o estado mais recente por estas "referências" (o setInterval guardaria
   // uma cópia velha do voo e dos outros drones se lesse direto das variáveis)
@@ -541,7 +569,10 @@ export default function Simular() {
       });
       for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
         [principal, ...rede] = aproximarDrones(
-          [avancarVoo(principal, passos[0], eventos, regiao), ...avancarRede(rede, passos.slice(1), regiao)],
+          [
+            avancarVoo(principal, passos[0], eventos, regiao),
+            ...avancarRede(rede, passos.slice(1), regiao, eventosDosOutros),
+          ],
           escalaTrafego
         );
       }
@@ -670,7 +701,7 @@ export default function Simular() {
               : []
           }
           vista={vista}
-          marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, paradas) : []}
+          marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, paradas, rotasDosOutros) : []}
           // O drone principal sempre mostra o nome de rádio (o mesmo do rádio: SADEC-01, ou o
           // da operação)
           nomeDrone={(voo && voo.idDrone) || (configuracao.operacao ? configuracao.operacao.drones[0].idDrone : 'SADEC-01')}
@@ -825,6 +856,7 @@ export default function Simular() {
               distanciaIda={distanciaIda}
               distanciaVolta={distanciaVolta}
               kmColeta={kmColeta}
+              drones={dronesDaMissao}
               aoMudar={(lista) => mudar('eventos', lista)}
             />
           </Secao>

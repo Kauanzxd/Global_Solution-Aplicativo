@@ -117,14 +117,15 @@ export function criarVooDaRede(extra) {
 // espera acaba, é a vez dele: avisa no rádio que está decolando.
 // "passoKm": um número (o mesmo passo para todos) ou uma lista com o passo de cada drone
 // (na câmera lenta, só o drone que está falando anda devagar).
-export function avancarRede(voos, passoKm, regiao) {
+// "eventosPorDrone" (opcional): nome de rádio → eventos daquele drone (pane, GPS...)
+export function avancarRede(voos, passoKm, regiao, eventosPorDrone = {}) {
   return voos.map((voo, indice) => {
     const passo = Array.isArray(passoKm) ? passoKm[indice] : passoKm;
     if (voo.espera > 0) {
       const espera = voo.espera - passo;
       return espera > 0 ? { ...voo, espera } : { ...voo, espera, mensagem: 'Decolando...' };
     }
-    return avancarVoo(voo, passo, [], regiao);
+    return avancarVoo(voo, passo, eventosPorDrone[voo.idDrone] || [], regiao);
   });
 }
 
