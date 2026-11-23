@@ -419,8 +419,10 @@ function MarcadorEvento({ marcador, s }) {
 // "pontosEntrega" (opcional): outros pontos de entrega para marcar (os abrigos de uma operação)
 // "mapaDeRuas" (opcional, ligado por padrão): mostra o mapa de ruas de verdade por baixo;
 //   desligado, volta o desenho simples (áreas, rios e vias principais)
+// "nomeDrone" (opcional): nome de rádio do drone principal (com outros drones no ar)
 export default function Mapa({
   mapaDeRuas = true,
+  nomeDrone,
   marcadores = [],
   pontosEntrega = [],
   outrosDrones = [],
@@ -757,6 +759,7 @@ export default function Mapa({
             comParaquedas={Boolean(paraquedas) && altitude > 0}
             incerteza={incerteza}
             s={s}
+            nome={nomeDrone}
           />
         </Svg>
 

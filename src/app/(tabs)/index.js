@@ -144,11 +144,18 @@ const semNumeros = (texto) => (texto || '').replace(/[\d.,]+/g, '#');
 
 // Câmera lenta por drone: quando um drone reage a um evento (pane, GPS, conversa com outro
 // drone...), SÓ ELE fica mais lento; os outros seguem na velocidade normal.
-//   - enquanto o evento dele espera a vez na voz, ele quase para (a ação espera a fala);
-//   - enquanto a voz conta, ele anda em câmera lenta (a ação acontece junto com a fala);
+//   - enquanto a voz conta o evento (ou ele espera a vez), anda bem devagar (a ação espera
+//     e acompanha a fala);
 //   - com a voz desligada, fica em câmera lenta por alguns segundos.
 const VELOCIDADE_CAMERA_LENTA = 0.1;
-const VELOCIDADE_ESPERANDO_A_VEZ = 0.005;
+// Com a voz: os drones com um evento na voz (contando ou esperando a vez, como os dois de
+// um acordo) andam todos na mesma câmera lenta forte. Desacelerar os dois por igual mantém
+// o encontro: a conversa acontece antes do cruzamento, como no rádio de verdade.
+const VELOCIDADE_CONVERSA = 0.02;
+// Escala do tráfego numa operação: a bolha de segurança (e o desvio) fica com 3,5% da
+// largura da visão, para aparecer com a câmera mostrando a região inteira
+const BOLHA_NA_TELA = 0.035;
+const BOLHA_DRONE_KM = 0.1;
 const DURACAO_CAMERA_LENTA_MS = 3500;
 // Mensagens de rotina (decolar, voar, entregar, voltar) e avisos informativos (bolha de
 // altura) não são eventos: não ligam a câmera lenta
@@ -483,6 +490,12 @@ export default function Simular() {
 
   // Os outros drones que vão voar junto: rotas que cruzam a ida do principal
   // (numa operação de emergência, são os outros drones que a Central acionou)
+  // Escala do tráfego: 1 nos voos normais (a câmera aproxima quando há obstáculo perto);
+  // numa operação, com a câmera fixa na região inteira, a bolha fica com 3,5% da visão
+  const escalaTrafego = configuracao.operacao
+    ? Math.max(1, (BOLHA_NA_TELA * focoDaOperacao(configuracao.operacao).km) / BOLHA_DRONE_KM)
+    : 1;
+
   const extrasPlanejados = configuracao.operacao
     ? configuracao.operacao.drones.slice(1)
     : montarRede(
@@ -515,19 +528,16 @@ export default function Simular() {
       // reagindo a um evento (veja VELOCIDADE_CAMERA_LENTA). Nunca mais rápido que a escolhida.
       const passos = [principal, ...rede].map((drone) => {
         const nome = drone.idDrone || 'SADEC-01';
-        const naVoz = voz.eventoNaVoz(nome);
         let velocidade = velocidadeRef.current;
-        if (naVoz === 'esperando') velocidade = Math.min(velocidade, VELOCIDADE_ESPERANDO_A_VEZ);
-        else if (naVoz === 'falando' || Date.now() < (cameraLentaAte.current[nome] || 0)) {
-          velocidade = Math.min(velocidade, VELOCIDADE_CAMERA_LENTA);
-        }
+        if (voz.eventoNaVoz(nome)) velocidade = Math.min(velocidade, VELOCIDADE_CONVERSA);
+        else if (Date.now() < (cameraLentaAte.current[nome] || 0)) velocidade = Math.min(velocidade, VELOCIDADE_CAMERA_LENTA);
         return (PASSO_KM * velocidade) / DECISOES_POR_TIQUE;
       });
       for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
-        [principal, ...rede] = aproximarDrones([
-          avancarVoo(principal, passos[0], eventos, regiao),
-          ...avancarRede(rede, passos.slice(1), regiao),
-        ]);
+        [principal, ...rede] = aproximarDrones(
+          [avancarVoo(principal, passos[0], eventos, regiao), ...avancarRede(rede, passos.slice(1), regiao)],
+          escalaTrafego
+        );
       }
       vooRef.current = principal;
       outrosRef.current = rede;
@@ -650,6 +660,8 @@ export default function Simular() {
           }
           vista={vista}
           marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, paradas) : []}
+          // Com outros drones no ar, o principal também mostra o nome de rádio
+          nomeDrone={voo !== null && outros.length > 0 ? voo.idDrone || 'SADEC-01' : undefined}
           outrosDrones={outros.map((outro, indice) => ({
             id: outro.idDrone,
             x: posicaoNaRota(outro.origem, outro.destino, outro.km).x,

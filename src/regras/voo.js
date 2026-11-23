@@ -88,7 +88,7 @@ const DISTANCIA_MAXIMA_CRITICA_KM = 1; // em temperatura crítica, só vai a uma
 const POTENCIA_MAXIMA = 1.5; // no desvio, anda 1,5 vez mais rápido
 const CONSUMO_DESVIO = 2; // e gasta o dobro por segundo
 const HORIZONTE_PREVISAO_S = 60; // só se preocupa com aproximações nos próximos 60 s
-const DISTANCIA_SAI_DE_CENA_KM = 1; // depois de passar, o obstáculo some do mapa a 1 km
+export const DISTANCIA_SAI_DE_CENA_KM = 1; // depois de passar, o obstáculo some do mapa a 1 km
 const FOLGA_IMPREVISIVEL_KM = 0.1; // com um drone que muda de rumo, 100 m a mais de margem
 // Histerese: para COMEÇAR a desviar, basta a previsão entrar na bolha; para PARAR,
 // a previsão precisa ficar 50% além da bolha. Sem isso, o drone "raspa" na borda
@@ -955,7 +955,8 @@ function mesmaDirecao(direcao, velocidade) {
 
 // Outro drone da rede vai mesmo cruzar o nosso caminho? Só então vale conversar pelo rádio.
 // "Cruzar" = o outro está andando, com rumo diferente do nosso (mais de 30°), e nos próximos
-// 60 s os dois ficam a menos de 3 bolhas (300 m). Não conversam:
+// 60 s os dois entrariam na bolha um do outro (assim todo acordo termina num desvio de
+// verdade). Não conversam:
 //   - dois drones na mesma direção, um atrás do outro (um só segue o outro);
 //   - com o outro parado no ar, subindo ou descendo numa filial ou num ponto de entrega
 //     (a bolha de altura resolve em segundos).
@@ -964,7 +965,7 @@ function emRotaDeColisao(voo, outro) {
   const { t, menorDistancia, direcao, velocidadeObstaculo } = preverAproximacao(voo, outro);
   const parado = Math.hypot(velocidadeObstaculo.x, velocidadeObstaculo.y) === 0;
   if (parado || mesmaDirecao(direcao, velocidadeObstaculo)) return false;
-  return t <= HORIZONTE_PREVISAO_S && menorDistancia < bolhaDe(outro) * 3;
+  return t <= HORIZONTE_PREVISAO_S && menorDistancia < bolhaDe(outro);
 }
 
 // A ameaça mais urgente, ou null se nenhum obstáculo vai chegar perto demais
@@ -980,10 +981,12 @@ function ameacaMaisUrgente(voo) {
     if (distancia > deteccaoDe(obstaculo)) continue; // o sensor ainda não enxerga
 
     // Outro drone com acordo de que ELE desvia: confiamos no combinado e seguimos reto,
-    // mas continuamos vigiando: se ele entrar na nossa bolha, reagimos mesmo assim
+    // mas continuamos vigiando: se ele chegar a meia bolha (perigo de verdade), reagimos mesmo
+    // assim. Na beirada da bolha não: é ali que o desvio dele nos deixa, e reagir seria
+    // desviar à toa (os dois desviando, que é o que o acordo evita).
     let bolha = bolhaDe(obstaculo);
     const eleDesvia = obstaculo.tipo === 'drone' && obstaculo.acordo && obstaculo.acordo.desvia === obstaculo.id;
-    if (eleDesvia && distancia > bolha) continue;
+    if (eleDesvia && distancia > bolha / 2) continue;
 
     // Os dois sem rádio: o outro CONTA que nós também vamos desviar pela direita.
     // Por isso não basta "ele já está desviando": usamos uma bolha bem maior e desviamos também.
@@ -1064,9 +1067,16 @@ function desviarDeObstaculo(voo, ameaca, passoKm) {
   const nome = TIPOS_OBSTACULO[ameaca.obstaculo.tipo].nome;
   const metros = Math.round(ameaca.distancia * 1000);
   let mensagem = `${nome} a ${metros} m! Desvio com potência máxima`;
-  if (combinado) mensagem = `Desviando pela direita do ${ameaca.obstaculo.id}, como combinado (${metros} m)`;
+  const combinadoQueEuDesvio = combinado && ameaca.obstaculo.acordo.desvia === (voo.idDrone ?? ID_NOSSO_DRONE);
+  if (combinadoQueEuDesvio) mensagem = `Desviando pela direita do ${ameaca.obstaculo.id}, como combinado (${metros} m)`;
+  // Pelo acordo, era o outro que desviava, mas ele entrou na nossa bolha: desviamos também
+  else if (combinado) mensagem = `${ameaca.obstaculo.id} perto demais! Desviando também pela direita (${metros} m)`;
   else if (regraDoAr) mensagem = `Regra do ar: desviando pela direita (${metros} m)`;
-  else if (ameaca.obstaculo.tipo === 'drone') mensagem = `Drone sem rádio a ${metros} m! Nós desviamos, com potência máxima`;
+  // Drone da rede (com rádio), mas sem acordo: não era um cruzamento (por exemplo, os dois
+  // na mesma direção, chegando perto aos poucos). Mesmo assim, perto demais: desvia.
+  else if (ameaca.obstaculo.tipo === 'drone' && ameaca.obstaculo.comunicacao) {
+    mensagem = `${ameaca.obstaculo.id} a ${metros} m, perto demais! Desviando pela direita`;
+  } else if (ameaca.obstaculo.tipo === 'drone') mensagem = `Drone sem rádio a ${metros} m! Nós desviamos, com potência máxima`;
   return {
     ...voo,
     origem: novo, // o trecho recomeça de onde o drone foi parar, rumo ao mesmo alvo
@@ -1119,7 +1129,7 @@ function negociar(voo, outro) {
   return {
     ...voo,
     obstaculos,
-    mensagem: `Drone ${outro.id} a ${Math.round(DETECCAO_RADIO_KM * 1000)} m. Conversa pelo rádio... Acordo (${explicarCriterio(criterio, nos, dele)}): ${decisao}`,
+    mensagem: `Drone ${outro.id} a ${Math.round((outro.radioKm ?? DETECCAO_RADIO_KM) * 1000)} m. Conversa pelo rádio... Acordo (${explicarCriterio(criterio, nos, dele)}): ${decisao}`,
   };
 }
 
@@ -1402,7 +1412,7 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
   if (voo.obstaculos && voo.obstaculos.length > 0) {
     const aqui = posicaoAtual(voo);
     const aindaEmCena = voo.obstaculos.filter(
-      (o) => voo.tempo < o.chegada || distanciaKm(aqui, medirObstaculo(o, voo.tempo, aqui).agora) < DISTANCIA_SAI_DE_CENA_KM
+      (o) => voo.tempo < o.chegada || distanciaKm(aqui, medirObstaculo(o, voo.tempo, aqui).agora) < (o.saiDeCenaKm ?? DISTANCIA_SAI_DE_CENA_KM)
     );
     if (aindaEmCena.length !== voo.obstaculos.length) voo = { ...voo, obstaculos: aindaEmCena };
   }
@@ -1419,7 +1429,7 @@ export function avancarVoo(voo, passoKm, eventos, regiao) {
         o.tipo === 'drone' &&
         o.comunicacao &&
         !o.acordo &&
-        distanciaKm(local, posicaoObstaculo(o, voo.tempo)) <= DETECCAO_RADIO_KM &&
+        distanciaKm(local, posicaoObstaculo(o, voo.tempo)) <= (o.radioKm ?? DETECCAO_RADIO_KM) &&
         emRotaDeColisao(voo, o)
     );
     if (semAcordo) return negociar(voo, semAcordo);

@@ -5,8 +5,9 @@
 // pelo rádio: a regra decide quem desvia.
 import { verificarDecolagem } from './bateria.js';
 import { distanciaKm } from './distancia.js';
-import { ANTECEDENCIA_KM } from './obstaculos.js';
-import { altitudeDoVoo, avancarVoo, avistarDrone, estaNoAr, posicaoNaRota } from './voo.js';
+import { ANTECEDENCIA_KM, DETECCAO_SENSOR_KM, TIPOS_OBSTACULO } from './obstaculos.js';
+import { DETECCAO_RADIO_KM } from './trafego.js';
+import { DISTANCIA_SAI_DE_CENA_KM, altitudeDoVoo, avancarVoo, avistarDrone, estaNoAr, posicaoNaRota } from './voo.js';
 
 // Bolha de altura: com mais de 30 m de diferença na vertical, dois drones não se cruzam
 // (um descendo para entregar e outro a 120 m, por exemplo). Ninguém precisa desviar.
@@ -134,16 +135,22 @@ function posicao(voo) {
 
 // Saiu da bolha de altura: o outro drone deixa de ser obstáculo para este voo (se estava
 // desviando dele, o desvio termina no próximo passo). Sai também da lista de "vistos":
-// se os dois voltarem à mesma altura, eles se enxergam de novo.
+// se os dois voltarem à mesma altura, eles se enxergam de novo. O aviso no rádio só sai
+// quando cancela alguma coisa (um acordo ou um desvio): senão, seria só barulho.
 function esquecerDrone(voo, idOutro, altitudeOutro) {
   const tinha = (voo.obstaculos || []).some((o) => o.tipo === 'drone' && o.id === idOutro);
   if (!tinha) return voo;
   const minha = altitudeDoVoo(voo);
   const situacaoOutro = altitudeOutro < minha ? 'abaixo' : 'acima';
-  return {
+  const cancelaAlgo = voo.desviandoObstaculo || voo.obstaculos.some((o) => o.tipo === 'drone' && o.id === idOutro && o.acordo);
+  const esquecido = {
     ...voo,
     obstaculos: voo.obstaculos.filter((o) => !(o.tipo === 'drone' && o.id === idOutro)),
     dronesVistos: (voo.dronesVistos || []).filter((id) => id !== idOutro),
+  };
+  if (!cancelaAlgo) return esquecido;
+  return {
+    ...esquecido,
     mensagem: `${idOutro} está ${situacaoOutro}, a ${altitudeOutro} m (nós a ${minha} m): fora da bolha de altura, sem risco de colisão`,
   };
 }
@@ -164,7 +171,9 @@ const VELOCIDADE_KM_S = 0.015; // 15 m/s, a mesma dos voos
 // posição e o rumo DE VERDADE do outro drone (antes, ele vinha sempre de frente, pela rota de
 // quem via, e até um drone atrás, na mesma direção, parecia vir de encontro).
 // Enquanto não há acordo, a bateria e a missão do outro também são atualizadas.
-function atualizarOutro(voo, outro) {
+// "escala": multiplica as distâncias do tráfego (bolha, sensores, rádio), para o desvio
+// ficar visível com a câmera longe (veja aproximarDrones).
+function atualizarOutro(voo, outro, escala) {
   const id = nomeDe(outro);
   if (!obstaculoDo(voo, id)) return voo;
   const aqui = posicao(outro);
@@ -180,6 +189,10 @@ function atualizarOutro(voo, outro) {
     velocidade: { x: rumo.x * rapidez, y: rumo.y * rapidez },
     direita: { x: -rumo.y, y: rumo.x }, // a direita dele, no rumo dele
     descendo: outro.situacao === 'descendo', // pousando: saindo da nossa altura
+    bolhaKm: TIPOS_OBSTACULO.drone.bolhaKm * escala,
+    deteccaoKm: DETECCAO_SENSOR_KM * escala,
+    radioKm: DETECCAO_RADIO_KM * escala,
+    saiDeCenaKm: DISTANCIA_SAI_DE_CENA_KM * escala,
   };
   return {
     ...voo,
@@ -217,7 +230,10 @@ function sincronizarAcordo(a, b) {
 // Drones perto um do outro (até 800 m, quando o obstáculo "entra em cena") se enxergam,
 // desde que estejam quase na mesma altura (bolha de altura).
 // "todos": o principal e os extras. Cada par entra uma vez em cada um (avistarDrone cuida disso).
-export function aproximarDrones(todos) {
+// "escala" (opcional): multiplica as distâncias do tráfego (entrar em cena, bolha, sensores e
+// rádio). Com a câmera longe (uma operação com a região inteira na tela), um desvio de 100 m
+// não aparece; com a escala, a bolha e o desvio crescem junto com a visão.
+export function aproximarDrones(todos, escala = 1) {
   const prontos = todos.map((voo) => voo);
   const nome = (voo) => voo.idDrone ?? 'SADEC-01';
   for (let i = 0; i < prontos.length; i++) {
@@ -225,7 +241,7 @@ export function aproximarDrones(todos) {
       const a = prontos[i];
       const b = prontos[j];
       const noAr = estaNoAr(a) && estaNoAr(b) && !(a.espera > 0) && !(b.espera > 0);
-      if (!noAr || distanciaKm(posicao(a), posicao(b)) > ANTECEDENCIA_KM) continue;
+      if (!noAr || distanciaKm(posicao(a), posicao(b)) > ANTECEDENCIA_KM * escala) continue;
 
       // Muito acima ou abaixo: não é ameaça (e um desvio que já tinha começado é cancelado)
       const altitudeA = altitudeDoVoo(a);
@@ -236,8 +252,8 @@ export function aproximarDrones(todos) {
         continue;
       }
       const comoOutro = (voo) => ({ id: nome(voo), prioridade: voo.prioridade ?? 'saude', bateria: voo.bateria });
-      const vistoA = atualizarOutro(avistarDrone(a, comoOutro(b)), b);
-      const vistoB = atualizarOutro(avistarDrone(b, comoOutro(a)), a);
+      const vistoA = atualizarOutro(avistarDrone(a, comoOutro(b)), b, escala);
+      const vistoB = atualizarOutro(avistarDrone(b, comoOutro(a)), a, escala);
       [prontos[i], prontos[j]] = sincronizarAcordo(vistoA, vistoB);
     }
   }
