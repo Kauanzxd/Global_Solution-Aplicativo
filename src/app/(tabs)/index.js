@@ -660,8 +660,9 @@ export default function Simular() {
           }
           vista={vista}
           marcadores={voo === null ? marcadoresDosEventos(configuracao.eventos, paradas) : []}
-          // Com outros drones no ar, o principal também mostra o nome de rádio
-          nomeDrone={voo !== null && outros.length > 0 ? voo.idDrone || 'SADEC-01' : undefined}
+          // O drone principal sempre mostra o nome de rádio (o mesmo do rádio: SADEC-01, ou o
+          // da operação)
+          nomeDrone={(voo && voo.idDrone) || (configuracao.operacao ? configuracao.operacao.drones[0].idDrone : 'SADEC-01')}
           outrosDrones={outros.map((outro, indice) => ({
             id: outro.idDrone,
             x: posicaoNaRota(outro.origem, outro.destino, outro.km).x,
@@ -695,7 +696,7 @@ export default function Simular() {
         </Pressable>
         <Pressable
           style={[styles.chip, voz.ligada && styles.chipLigado]}
-          onPress={() => voz.setLigada(!voz.ligada)}
+          onPress={voz.alternar}
           accessibilityRole="switch"
           accessibilityState={{ checked: voz.ligada }}
         >

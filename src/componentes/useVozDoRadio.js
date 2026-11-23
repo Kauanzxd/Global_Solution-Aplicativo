@@ -1,7 +1,8 @@
 import * as Speech from 'expo-speech';
 import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import { chiadoDeAbertura, decodificarAudio, tocarComoRadio } from './somDeRadio';
+import { chiadoDeAbertura, decodificarAudio, destravarAudio, tocarComoRadio } from './somDeRadio';
+import { TEMA } from './tema';
 
 // Voz do rádio: lê em voz alta as mensagens dos drones (expo-speech, a voz do próprio
 // celular ou navegador). As mensagens entram numa fila e são lidas uma de cada vez.
@@ -299,6 +300,16 @@ export default function useVozDoRadio({ aoMostrar }) {
     Speech.stop();
   };
 
+  // Liga ou desliga a voz (o botão "Voz do rádio"). Ao ligar, ainda dentro do toque, destrava
+  // o áudio (no iPhone, sem isso o som não voltava) e a Central confirma pelo rádio.
+  const alternar = () => {
+    const ligar = !ligadaRef.current;
+    setLigada(ligar);
+    if (!ligar) return;
+    ligadaRef.current = true;
+    destravarAudio();
+    falar([{ id: `central-${Date.now()}`, nome: 'Central SADEC', cor: TEMA.marca, texto: 'Voz do rádio ligada', evento: false }]);
+  };
 
   // Ao desligar a voz: o que ainda estava na fila vai direto para o texto, e a voz cala
   useEffect(() => {
@@ -308,5 +319,5 @@ export default function useVozDoRadio({ aoMostrar }) {
   }, [ligada]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => parar, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { ligada, setLigada, falar, parar, eventoNaVoz };
+  return { ligada, alternar, falar, parar, eventoNaVoz };
 }

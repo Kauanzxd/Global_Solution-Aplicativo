@@ -419,7 +419,7 @@ function MarcadorEvento({ marcador, s }) {
 // "pontosEntrega" (opcional): outros pontos de entrega para marcar (os abrigos de uma operação)
 // "mapaDeRuas" (opcional, ligado por padrão): mostra o mapa de ruas de verdade por baixo;
 //   desligado, volta o desenho simples (áreas, rios e vias principais)
-// "nomeDrone" (opcional): nome de rádio do drone principal (com outros drones no ar)
+// "nomeDrone" (opcional): nome de rádio do drone principal (aparece em cima dele)
 export default function Mapa({
   mapaDeRuas = true,
   nomeDrone,

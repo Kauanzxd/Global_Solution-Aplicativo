@@ -13,7 +13,8 @@ function audio() {
   const Contexto = window.AudioContext || window.webkitAudioContext;
   if (!Contexto) return null;
   if (!contexto) contexto = new Contexto();
-  if (contexto.state === 'suspended') contexto.resume();
+  // Parado ("suspended") ou, no iPhone, "interrupted": volta a tocar
+  if (contexto.state !== 'running') contexto.resume();
   return contexto;
 }
 
@@ -38,6 +39,17 @@ export function chiadoDeAbertura() {
 
   ruido.connect(filtro).connect(volume).connect(ctx.destination);
   ruido.start();
+}
+
+// No iPhone, o áudio da página só é liberado dentro de um toque do usuário. Chamada no toque
+// que liga a voz: retoma o áudio e toca um som mudo (1 amostra), o que deixa o som liberado.
+export function destravarAudio() {
+  const ctx = audio();
+  if (!ctx) return;
+  const fonte = ctx.createBufferSource();
+  fonte.buffer = ctx.createBuffer(1, 1, 22050);
+  fonte.connect(ctx.destination);
+  fonte.start();
 }
 
 // ---------- Voz da nuvem ----------
