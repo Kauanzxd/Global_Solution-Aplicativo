@@ -14,22 +14,46 @@ export default function Contador({ valor, passo, passoGrande, minimo, maximo, su
   return (
     <View style={styles.linha}>
       {passoGrande ? (
-        <Pressable onPress={() => somar(-passoGrande)} disabled={valor <= minimo} style={[styles.pulo, valor <= minimo && styles.desligado]}>
+        <Pressable
+          onPress={() => somar(-passoGrande)}
+          disabled={valor <= minimo}
+          style={[styles.pulo, valor <= minimo && styles.desligado]}
+          accessibilityRole="button"
+          accessibilityLabel={`Diminuir ${String(passoGrande).replace('.', ',')}`}
+        >
           <Text style={styles.textoPulo}>−{String(passoGrande).replace('.', ',')}</Text>
         </Pressable>
       ) : null}
-      <Pressable onPress={diminuir} disabled={valor <= minimo} style={[styles.botao, valor <= minimo && styles.desligado]}>
+      <Pressable
+        onPress={diminuir}
+        disabled={valor <= minimo}
+        style={[styles.botao, valor <= minimo && styles.desligado]}
+        accessibilityRole="button"
+        accessibilityLabel="Diminuir"
+      >
         <Text style={styles.sinal}>−</Text>
       </Pressable>
       <Text style={styles.valor}>
         {valor.toFixed(casas).replace('.', ',')}
         {sufixo}
       </Text>
-      <Pressable onPress={aumentar} disabled={valor >= maximo} style={[styles.botao, valor >= maximo && styles.desligado]}>
+      <Pressable
+        onPress={aumentar}
+        disabled={valor >= maximo}
+        style={[styles.botao, valor >= maximo && styles.desligado]}
+        accessibilityRole="button"
+        accessibilityLabel="Aumentar"
+      >
         <Text style={styles.sinal}>+</Text>
       </Pressable>
       {passoGrande ? (
-        <Pressable onPress={() => somar(passoGrande)} disabled={valor >= maximo} style={[styles.pulo, valor >= maximo && styles.desligado]}>
+        <Pressable
+          onPress={() => somar(passoGrande)}
+          disabled={valor >= maximo}
+          style={[styles.pulo, valor >= maximo && styles.desligado]}
+          accessibilityRole="button"
+          accessibilityLabel={`Aumentar ${String(passoGrande).replace('.', ',')}`}
+        >
           <Text style={styles.textoPulo}>+{String(passoGrande).replace('.', ',')}</Text>
         </Pressable>
       ) : null}

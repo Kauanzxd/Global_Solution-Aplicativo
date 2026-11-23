@@ -40,13 +40,14 @@ function Numero({ valor, legenda }) {
 // O resumo que aparece quando o voo termina.
 // "voo": o voo no estado final | "bateriaInicial": a bateria na decolagem (%)
 // "etapas": os momentos marcantes do voo [{ km, mensagem }] (cada mudança de fase)
-export default function ResumoVoo({ voo, bateriaInicial, etapas }) {
+// "titulo" (opcional): com vários drones, o título leva o nome do drone
+export default function ResumoVoo({ voo, bateriaInicial, etapas, titulo = 'Resumo do voo' }) {
   const final = FINAIS[voo.situacao] || { titulo: 'Fim do voo', cor: TEMA.texto };
   const distancia = voo.hodometro || 0; // o hodômetro soma todos os trechos voados
   const gasto = Math.max(bateriaInicial - (voo.bateria ?? bateriaInicial), 0);
 
   return (
-    <Secao titulo="Resumo do voo">
+    <Secao titulo={titulo}>
       <Text style={[styles.resultado, { color: final.cor }]}>{final.titulo}</Text>
       <Text style={styles.mensagem}>{voo.mensagem}</Text>
 

@@ -12,6 +12,7 @@ import LogDoRadio from '../../componentes/LogDoRadio';
 import useVozDoRadio from '../../componentes/useVozDoRadio';
 import Mapa from '../../componentes/Mapa';
 import Opcoes from '../../componentes/Opcoes';
+import ResumoDosDrones from '../../componentes/ResumoDosDrones';
 import ResumoVoo from '../../componentes/ResumoVoo';
 import Secao from '../../componentes/Secao';
 import { TEMA } from '../../componentes/tema';
@@ -284,6 +285,10 @@ export default function Simular() {
 
   // Outros drones da rede voando ao mesmo tempo (cada um é um voo de verdade)
   const [outros, setOutros] = useState([]);
+  // Os momentos marcantes de cada um dos outros drones (para o resumo de todos):
+  // nome de rádio → [{ km, mensagem }]
+  const etapasDosOutros = useRef({});
+  const [mostrarResumos, setMostrarResumos] = useState(false);
 
   // Velocidade da simulação (o relógio lê pela referência, para mudar no meio do voo)
   const [velocidade, setVelocidade] = useState(VELOCIDADE_PADRAO);
@@ -312,6 +317,7 @@ export default function Simular() {
   // Começa um voo novo (e esvazia os momentos do voo anterior)
   const iniciar = () => {
     setEtapasDoVoo([]);
+    etapasDosOutros.current = {};
     setRadio([]);
     ultimaDoDrone.current = {};
     cameraLentaAte.current = {};
@@ -551,6 +557,11 @@ export default function Simular() {
         const chave = semNumeros(drone.mensagem);
         if (!drone.mensagem || ultimaDoDrone.current[nome] === chave) return;
         ultimaDoDrone.current[nome] = chave;
+        // Guarda o momento para o resumo deste drone (o principal tem o resumo próprio)
+        if (indice > 0) {
+          const lista = etapasDosOutros.current[nome] || (etapasDosOutros.current[nome] = []);
+          lista.push({ km: drone.hodometro || 0, mensagem: drone.mensagem });
+        }
         const cor = indice === 0 ? '#0B1F33' : (extrasPlanejados[indice - 1] && extrasPlanejados[indice - 1].cor) || TEMA.marca;
         // Numa emergência com relato (zonas checadas e decisão), o rádio conta linha por linha
         const relato = drone.relato && drone.relato.para === drone.mensagem ? drone.relato.linhas : null;
@@ -882,6 +893,29 @@ export default function Simular() {
       {/* Voo terminado: o resumo (resultado, distância, tempo, bateria e como foi o voo) */}
       {voo !== null && !emVoo ? (
         <ResumoVoo voo={voo} bateriaInicial={configuracao.bateria} etapas={etapasDoVoo} />
+      ) : null}
+
+      {/* Com vários drones: quando todos pousam, o resumo de cada um numa aba que sobe */}
+      {voo !== null && !algumNoAr && outros.length > 0 ? (
+        <Pressable style={[styles.botao, styles.botaoSecundario]} onPress={() => setMostrarResumos(true)} accessibilityRole="button">
+          <Text style={[styles.textoBotao, styles.textoSecundario]}>Ver o resumo de todos os drones ({outros.length + 1})</Text>
+        </Pressable>
+      ) : null}
+      {voo !== null ? (
+        <ResumoDosDrones
+          visivel={mostrarResumos}
+          aoFechar={() => setMostrarResumos(false)}
+          resumos={[
+            { nome: voo.idDrone || 'SADEC-01', cor: '#0B1F33', voo, bateriaInicial: configuracao.bateria, etapas: etapasDoVoo },
+            ...outros.map((outro, indice) => ({
+              nome: outro.idDrone,
+              cor: (extrasPlanejados[indice] && extrasPlanejados[indice].cor) || TEMA.marca,
+              voo: outro,
+              bateriaInicial: (extrasPlanejados[indice] && extrasPlanejados[indice].bateria) || outro.bateria,
+              etapas: etapasDosOutros.current[outro.idDrone] || [],
+            })),
+          ]}
+        />
       ) : null}
 
       {/* Versão publicada (o código do commit, colocado na hora de gerar o site): serve para
