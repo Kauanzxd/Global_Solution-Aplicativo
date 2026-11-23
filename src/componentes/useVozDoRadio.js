@@ -78,6 +78,57 @@ function fraseDeRadio({ nome, texto, evento, parte }) {
   return `${comAbertura ? `${abertura}: ` : ''}${frase}`;
 }
 
+// ---------- Para a voz não ficar para trás ----------
+// Uma voz só conta o que 6 drones fazem: se tudo fosse falado por inteiro e em ordem, a fila
+// cresceria e a voz contaria coisas de 20 s atrás. Por isso:
+//   1. eventos (acordo, desvio, pane...) passam na frente da rotina;
+//   2. rotina que esperou demais na fila já ficou velha: aparece só no texto;
+//   3. rotina igual de vários drones no mesmo instante vira uma fala só;
+//   4. na voz, a rotina é dita de forma curta (o texto completo fica na tela).
+const VALIDADE_ROTINA_MS = 2500;
+
+// Versões curtas, só para a voz
+const RESUMOS = [
+  [/^Na .+, aguardando a vez de decolar$/, 'aguardando na filial'],
+  [/^Decolando.*$/, 'decolando'],
+  [/^Voando.*$/, 'em rota'],
+  [/^Sobre o destino: descendo na vertical$/, 'descendo no destino'],
+  [/^Pousou no ponto de entrega: entregando a carga.*$/, 'entregando'],
+  [/^Entrega feita! Decolando para .*$/, 'entrega feita, voltando'],
+  [/^Voltando para a filial.*$/, 'voltando'],
+  [/^Sobre a (Filial .+): descendo na vertical$/, 'descendo na $1'],
+  [/^Missão concluída: pousou na (Filial .+)!$/, 'missão concluída na $1'],
+  [/^Desvio concluído\..*$/, 'desvio concluído'],
+  [/^Desviando pela direita do (SADEC-\d+).*$/, 'desviando pela direita do $1'],
+  // Acordos (já sem os detalhes entre parênteses): quem desvia, em poucas palavras
+  [/^Drone (SADEC-\d+) a \d+ m\. Conversa pelo rádio\.{3} Acordo: nós desviamos pela direita.*$/, '$1 no rádio, eu desvio pela direita'],
+  [/^Drone (SADEC-\d+) a \d+ m\. Conversa pelo rádio\.{3} Acordo: .*nós seguimos reto.*$/, '$1 no rádio, ele desvia e eu sigo reto'],
+  [/^Entendido, SADEC-\d+: nós desviamos.*$/, 'entendido, eu desvio pela direita'],
+  [/^Entendido, SADEC-\d+: você desvia.*$/, 'entendido, eu sigo reto'],
+  [/^(SADEC-\d+) está (abaixo|acima).*fora da bolha de altura.*$/, '$1 em outra altura, sem risco'],
+];
+function resumirParaFala(texto) {
+  const semDetalhes = texto.replace(/\s*\([^)]*\)/g, ''); // bateria, critério... ficam na tela
+  const regra = RESUMOS.find(([padrao]) => padrao.test(semDetalhes));
+  return regra ? semDetalhes.replace(regra[0], regra[1]) : texto;
+}
+
+// Os dois drones de um cruzamento anunciaram o acordo no mesmo instante? Quem fala por
+// segundo só confirma ("entendido"), como num rádio de verdade.
+function respostaAoAcordo(mensagem, fila) {
+  const outro = /^Drone (SADEC-\d+) a \d+ m\. Conversa pelo rádio/.exec(mensagem.texto);
+  if (!outro) return null;
+  const jaFalou = fila.some((item) => item.nome === outro[1] && item.falado && item.mensagem.texto.includes(`Drone ${mensagem.nome} `));
+  if (!jaFalou) return null;
+  const semDetalhes = mensagem.texto.replace(/\s*\([^)]*\)/g, ''); // "nós (retorno, 51%) desviamos" → "nós desviamos"
+  return /Acordo: nós desviamos/.test(semDetalhes) ? 'entendido, eu desvio pela direita' : 'entendido, eu sigo reto';
+}
+
+// "SADEC-11", "SADEC-14", "SADEC-16" → "SADEC-11, SADEC-14 e SADEC-16"
+function juntarNomes(nomes) {
+  return nomes.length === 1 ? nomes[0] : `${nomes.slice(0, -1).join(', ')} e ${nomes[nomes.length - 1]}`;
+}
+
 // Quanto tempo uma fala deve levar (para destravar a fila se a voz não avisar que acabou)
 // (uns 70 ms por letra no ritmo normal; mais rápido, proporcionalmente menos)
 function duracaoEstimadaMs(texto) {
@@ -153,7 +204,9 @@ export default function useVozDoRadio({ aoMostrar }) {
     if (!atual.current) return;
     // A mensagem aparece no rádio escrito agora, junto com o começo da fala
     aoMostrarRef.current(atual.current.mensagem);
-    const falado = atual.current.falado;
+    // Rotina que esperou demais já ficou velha: fica só no texto
+    const velha = !atual.current.evento && Date.now() - atual.current.criadoEm > VALIDADE_ROTINA_MS;
+    const falado = velha ? null : atual.current.falado;
     if (!falado) {
       proxima(); // só texto: já passa para a próxima
       return;
@@ -182,24 +235,48 @@ export default function useVozDoRadio({ aoMostrar }) {
   };
 
   // Coloca mensagens na fila. "mensagens": [{ id, nome, cor, texto, evento, parte }]
-  // Todas entram (para o texto sair na ordem certa) e todas são faladas, menos as zonas
-  // checadas no meio de um relato (a voz fala só "checando zonas" e a decisão).
-  // Rotina que ficou velha na fila (o drone já mudou de estado) vira só texto: a voz conta
-  // sempre o estado ATUAL de cada drone, sem atrasar a simulação.
+  // Todas entram (para o texto sair na ordem certa), mas a voz fala só o que ainda é atual
+  // (veja "Para a voz não ficar para trás", lá em cima). As zonas checadas no meio de um
+  // relato também ficam só no texto (a voz fala "checando zonas" e a decisão).
   const falar = (mensagens) => {
     if (!ligadaRef.current) {
       mensagens.forEach((mensagem) => aoMostrarRef.current(mensagem)); // voz desligada: só texto
       return;
     }
+    const agora = Date.now();
+    const grupos = new Map(); // rotina igual neste instante: texto curto → item que fala por todos
     mensagens.forEach((mensagem) => {
+      // Uma mensagem nova deixa velha a rotina anterior do mesmo drone que ainda não foi falada
       fila.current.forEach((item) => {
-        if (item.nome === mensagem.nome && !item.evento && !item.parte) item.falado = null; // ficou velha
+        if (item.nome === mensagem.nome && !item.evento && !item.parte) item.falado = null;
       });
-      const vaiFalar = mensagem.parte !== 'meio';
-      const falado = vaiFalar ? textoParaFala(fraseDeRadio(mensagem)) : null;
-      // o áudio da nuvem começa a baixar já, para estar pronto quando chegar a vez
-      const audio = falado ? buscarAudio(falado, vozDaNuvem(mensagem.nome)) : null;
-      fila.current.push({ mensagem, nome: mensagem.nome, falado, audio, evento: mensagem.evento, parte: mensagem.parte });
+      const curto = respostaAoAcordo(mensagem, fila.current) || resumirParaFala(mensagem.texto);
+      const item = { mensagem, nome: mensagem.nome, falado: null, audio: null, evento: mensagem.evento, parte: mensagem.parte, criadoEm: agora };
+
+      if (mensagem.parte !== 'meio') {
+        const grupo = !mensagem.evento && grupos.get(curto);
+        if (grupo) {
+          // Mesma rotina de outro drone neste instante: entra na fala do grupo
+          grupo.nomes.push(mensagem.nome);
+          grupo.falado = textoParaFala(`${juntarNomes(grupo.nomes)}: ${curto}`);
+        } else {
+          item.falado = textoParaFala(fraseDeRadio({ ...mensagem, texto: curto }));
+          if (!mensagem.evento) {
+            item.nomes = [mensagem.nome];
+            grupos.set(curto, item);
+          }
+        }
+      }
+
+      // Evento passa na frente de toda a rotina que está esperando (depois dos outros eventos)
+      const primeiraRotina = mensagem.evento ? fila.current.findIndex((outro) => !outro.evento) : -1;
+      if (primeiraRotina >= 0) fila.current.splice(primeiraRotina, 0, item);
+      else fila.current.push(item);
+    });
+    // O áudio da nuvem começa a baixar já (com o texto final de cada grupo), para estar
+    // pronto quando chegar a vez
+    fila.current.forEach((item) => {
+      if (item.falado && !item.audio && item.criadoEm === agora) item.audio = buscarAudio(item.falado, vozDaNuvem(item.nome));
     });
     if (!atual.current) proxima();
   };
