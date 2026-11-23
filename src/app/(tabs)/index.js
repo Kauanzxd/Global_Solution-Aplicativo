@@ -142,16 +142,17 @@ const VELOCIDADE_OPERACAO = 0.25; // operação de emergência: 6 drones ao mesm
 // Mensagens que mudam só nos números ("Drone a 225 m" → "a 213 m") contam como a mesma
 const semNumeros = (texto) => (texto || '').replace(/[\d.,]+/g, '#');
 
-// Câmera lenta: quando um drone reage a um evento (pane, GPS, outro drone, vento...), a
-// simulação fica bem mais lenta por alguns segundos, para dar tempo de ver a reação.
+// Câmera lenta por drone: quando um drone reage a um evento (pane, GPS, conversa com outro
+// drone...), SÓ ELE fica bem mais lento enquanto a voz conta o que está acontecendo (com a
+// voz desligada, por alguns segundos). Os outros seguem na velocidade normal.
 const VELOCIDADE_CAMERA_LENTA = 0.1;
-// Com a voz ligada e 2 ou mais mensagens esperando para serem faladas, a simulação quase
-// para, até a voz alcançar: assim o que a voz conta é o que está acontecendo no mapa
-const VELOCIDADE_ESPERANDO_RADIO = 0.03;
 const DURACAO_CAMERA_LENTA_MS = 3500;
-// Mensagens de rotina (decolar, voar, entregar, voltar) não são eventos: não ligam a câmera lenta
-const ROTINA = /^(Decolando|Voando|Voltando para|Aguardando|Sobre |Pousou no ponto|Entrega feita!|Missão concluída|Desviando pela direita|Desvio concluído)|coletad[oa]! Decolando|aguardando a vez de decolar/;
+// Mensagens de rotina (decolar, voar, entregar, voltar) e avisos informativos (bolha de
+// altura) não são eventos: não ligam a câmera lenta
+const ROTINA = /^(Decolando|Voando|Voltando para|Aguardando|Sobre |Pousou no ponto|Entrega feita!|Missão concluída|Desviando pela direita|Desvio concluído)|coletad[oa]! Decolando|aguardando a vez de decolar|fora da bolha de altura/;
 const ehEvento = (texto) => !ROTINA.test(texto);
+// Versão do site (o código do commit), colocada na hora de gerar: EXPO_PUBLIC_VERSAO=... npx expo export
+const VERSAO = process.env.EXPO_PUBLIC_VERSAO;
 const DECISOES_POR_TIQUE = 4; // 4 decisões por atualização da tela: reage mais rápido
 
 // Enquadramento de uma rota: o meio de todas as paradas, com folga em volta
@@ -283,8 +284,8 @@ export default function Simular() {
   const [radio, setRadio] = useState([]);
   const ultimaDoDrone = useRef({}); // a última mensagem (sem números) de cada drone
 
-  // Até que horas (Date.now) a câmera lenta vale; o estado só serve para mostrar o aviso
-  const cameraLentaAte = useRef(0);
+  // Câmera lenta de cada drone: nome de rádio → até que horas (Date.now) ela vale
+  const cameraLentaAte = useRef({});
 
   // Voz do rádio: lê as mensagens em voz alta (pode ser desligada). Cada mensagem aparece
   // no rádio escrito quando a voz chega nela, para o texto e a voz andarem juntos.
@@ -294,8 +295,6 @@ export default function Simular() {
   const rolagem = useRef(null);
   const topoDoMapa = useRef(0); // onde o mapa começa dentro da tela (medido pelo onLayout)
   const subirAoMapa = useRef(false); // pedido de subir a tela, feito no botão de iniciar
-  // Aviso no alto do mapa: null (velocidade normal), 'evento' ou 'radio' (esperando a voz)
-  const [cameraLenta, setCameraLenta] = useState(null);
 
   // Pedidos feitos na aba Pedidos: um deles pode chegar aqui para virar o voo
   const { pedidoParaVoar, setPedidoParaVoar, atualizarStatus } = usePedidos();
@@ -305,8 +304,7 @@ export default function Simular() {
     setEtapasDoVoo([]);
     setRadio([]);
     ultimaDoDrone.current = {};
-    cameraLentaAte.current = 0;
-    setCameraLenta(null);
+    cameraLentaAte.current = {};
     // A primeira fala sai aqui, no toque do botão: no iPhone e no navegador, a voz só é
     // liberada se começar por um toque do usuário
     voz.parar();
@@ -510,18 +508,19 @@ export default function Simular() {
     const relogio = setInterval(() => {
       let principal = vooRef.current;
       let rede = outrosRef.current;
-      // A velocidade de agora (nunca mais rápida que a escolhida):
-      //   - voz atrasada (2 ou mais mensagens esperando): quase parada, até a voz alcançar;
-      //   - evento (ou a voz contando um evento): câmera lenta, 0,1×.
-      const esperandoRadio = voz.atrasoDaVoz() >= 2;
-      const reagindo = Date.now() < cameraLentaAte.current || voz.narrandoEvento();
-      let velocidadeAgora = velocidadeRef.current;
-      if (esperandoRadio) velocidadeAgora = Math.min(velocidadeAgora, VELOCIDADE_ESPERANDO_RADIO);
-      else if (reagindo) velocidadeAgora = Math.min(velocidadeAgora, VELOCIDADE_CAMERA_LENTA);
-      setCameraLenta(esperandoRadio ? 'radio' : reagindo ? 'evento' : null);
-      const passo = (PASSO_KM * velocidadeAgora) / DECISOES_POR_TIQUE;
+      // O passo de cada drone: na velocidade escolhida, ou em câmera lenta (0,1×) se ESTE
+      // drone está reagindo a um evento (a voz contando, ou nos segundos depois do evento)
+      const passos = [principal, ...rede].map((drone) => {
+        const nome = drone.idDrone || 'SADEC-01';
+        const reagindo = Date.now() < (cameraLentaAte.current[nome] || 0) || voz.contandoEventoDe(nome);
+        const velocidade = reagindo ? Math.min(velocidadeRef.current, VELOCIDADE_CAMERA_LENTA) : velocidadeRef.current;
+        return (PASSO_KM * velocidade) / DECISOES_POR_TIQUE;
+      });
       for (let i = 0; i < DECISOES_POR_TIQUE; i++) {
-        [principal, ...rede] = aproximarDrones([avancarVoo(principal, passo, eventos, regiao), ...avancarRede(rede, passo, regiao)]);
+        [principal, ...rede] = aproximarDrones([
+          avancarVoo(principal, passos[0], eventos, regiao),
+          ...avancarRede(rede, passos.slice(1), regiao),
+        ]);
       }
       vooRef.current = principal;
       outrosRef.current = rede;
@@ -545,10 +544,15 @@ export default function Simular() {
           novas.push({ id: `${nome}-${Date.now()}-${indice}-${linha}`, nome, cor, texto, evento: Boolean(relato) || ehEvento(texto), parte });
         });
       });
+      // No mesmo instante, os acordos vêm primeiro (o "combinado" antes do "desviando")
+      const ehAcordo = (mensagem) => /Acordo|Entendido/.test(mensagem.texto);
+      novas.sort((a, b) => Number(ehAcordo(b)) - Number(ehAcordo(a)));
       // A voz decide quando cada uma aparece (desligada, aparecem na hora)
       voz.falar(novas);
-      // Algum drone começou a reagir a um evento? Liga (ou estende) a câmera lenta
-      if (novas.some((mensagem) => mensagem.evento)) cameraLentaAte.current = Date.now() + DURACAO_CAMERA_LENTA_MS;
+      // Quem começou a reagir a um evento entra em câmera lenta (só ele)
+      novas
+        .filter((mensagem) => mensagem.evento)
+        .forEach((mensagem) => (cameraLentaAte.current[mensagem.nome] = Date.now() + DURACAO_CAMERA_LENTA_MS));
     }, PASSO_MS);
 
     // Quando todos pousam (ou a tela fecha), desliga o relógio
@@ -650,12 +654,6 @@ export default function Simular() {
           }))}
           aoTocar={voo === null ? tocarNoMapa : undefined}
         />
-        {/* Aviso de câmera lenta, no alto do mapa */}
-        {voo !== null && cameraLenta ? (
-          <Text style={styles.avisoCameraLenta} accessibilityLiveRegion="polite">
-            {cameraLenta === 'radio' ? 'Câmera lenta: acompanhando o rádio' : 'Câmera lenta: reação ao evento'}
-          </Text>
-        ) : null}
       </View>
 
       {/* Durante o voo: o rádio logo abaixo do mapa, com as 5 últimas mensagens (em qualquer simulação) */}
@@ -865,6 +863,10 @@ export default function Simular() {
       {voo !== null && !emVoo ? (
         <ResumoVoo voo={voo} bateriaInicial={configuracao.bateria} etapas={etapasDoVoo} />
       ) : null}
+
+      {/* Versão publicada (o código do commit, colocado na hora de gerar o site): serve para
+          conferir no celular se a página aberta é a versão mais nova */}
+      {VERSAO ? <Text style={styles.versao}>versão {VERSAO}</Text> : null}
     </ScrollView>
   );
 }
@@ -888,19 +890,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-  },
-  avisoCameraLenta: {
-    position: 'absolute',
-    top: 8,
-    alignSelf: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    overflow: 'hidden',
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    backgroundColor: 'rgba(11, 31, 51, 0.85)',
   },
   rotuloVelocidade: {
     fontSize: 13,
@@ -1101,5 +1090,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     color: TEMA.perigo,
+  },
+  versao: {
+    marginTop: 24,
+    fontSize: 11,
+    textAlign: 'center',
+    color: TEMA.textoSuave,
   },
 });

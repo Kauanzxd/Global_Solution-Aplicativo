@@ -5,8 +5,9 @@ import { chiadoDeAbertura, decodificarAudio, tocarComoRadio } from './somDeRadio
 
 // Voz do rádio: lê em voz alta as mensagens dos drones (expo-speech, a voz do próprio
 // celular ou navegador). As mensagens entram numa fila e são lidas uma de cada vez.
-// Enquanto a voz conta um EVENTO (pane, GPS, conversa entre drones...), "narrandoEvento()"
-// responde true: a tela usa isso para manter a câmera lenta até a fala terminar.
+// Enquanto a voz conta um EVENTO de um drone (pane, GPS, conversa com outro drone...),
+// "contandoEventoDe(nome)" responde true: a tela deixa só esse drone em câmera lenta até a
+// fala terminar.
 
 const IDIOMA = 'pt-BR';
 const RITMO = 1.4; // bem mais rápido que o normal, como a fala de rádio (e para não atrasar em relação ao mapa)
@@ -183,13 +184,17 @@ export default function useVozDoRadio({ aoMostrar }) {
   // Coloca mensagens na fila. "mensagens": [{ id, nome, cor, texto, evento, parte }]
   // Todas entram (para o texto sair na ordem certa) e todas são faladas, menos as zonas
   // checadas no meio de um relato (a voz fala só "checando zonas" e a decisão).
-  // Se a voz atrasar, a simulação espera (veja atrasoDaVoz).
+  // Rotina que ficou velha na fila (o drone já mudou de estado) vira só texto: a voz conta
+  // sempre o estado ATUAL de cada drone, sem atrasar a simulação.
   const falar = (mensagens) => {
     if (!ligadaRef.current) {
       mensagens.forEach((mensagem) => aoMostrarRef.current(mensagem)); // voz desligada: só texto
       return;
     }
     mensagens.forEach((mensagem) => {
+      fila.current.forEach((item) => {
+        if (item.nome === mensagem.nome && !item.evento && !item.parte) item.falado = null; // ficou velha
+      });
       const vaiFalar = mensagem.parte !== 'meio';
       const falado = vaiFalar ? textoParaFala(fraseDeRadio(mensagem)) : null;
       // o áudio da nuvem começa a baixar já, para estar pronto quando chegar a vez
@@ -199,9 +204,14 @@ export default function useVozDoRadio({ aoMostrar }) {
     if (!atual.current) proxima();
   };
 
-  // Quantas mensagens a voz ainda tem para contar (a atual + as da fila). A simulação usa
-  // isso para esperar a voz alcançar.
-  const atrasoDaVoz = () => (ligadaRef.current ? fila.current.length + (atual.current ? 1 : 0) : 0);
+  // A voz está contando (ou ainda vai contar) um evento deste drone? A tela usa isso para
+  // deixar só ele em câmera lenta até a fala terminar.
+  const contandoEventoDe = (nome) =>
+    ligadaRef.current &&
+    Boolean(
+      (atual.current && atual.current.nome === nome && atual.current.evento) ||
+        fila.current.some((item) => item.nome === nome && item.evento)
+    );
 
   // Cala a voz e esvazia a fila (nova simulação, interromper, desligar a voz)
   const parar = () => {
@@ -213,9 +223,6 @@ export default function useVozDoRadio({ aoMostrar }) {
     Speech.stop();
   };
 
-  // A voz está contando um evento (agora ou na fila)?
-  const narrandoEvento = () =>
-    ligadaRef.current && Boolean((atual.current && atual.current.evento) || fila.current.some((item) => item.evento));
 
   // Ao desligar a voz: o que ainda estava na fila vai direto para o texto, e a voz cala
   useEffect(() => {
@@ -225,5 +232,5 @@ export default function useVozDoRadio({ aoMostrar }) {
   }, [ligada]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => parar, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { ligada, setLigada, falar, parar, narrandoEvento, atrasoDaVoz };
+  return { ligada, setLigada, falar, parar, contandoEventoDe };
 }
