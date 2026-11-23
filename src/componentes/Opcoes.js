@@ -14,6 +14,8 @@ export default function Opcoes({ opcoes, valor, aoEscolher }) {
             key={opcao.valor}
             onPress={() => aoEscolher(opcao.valor)}
             style={[styles.pilula, escolhida && { backgroundColor: cor, borderColor: cor }]}
+            accessibilityRole="radio"
+            aria-checked={escolhida}
           >
             <Text style={[styles.texto, escolhida && styles.textoEscolhido]}>{opcao.rotulo}</Text>
           </Pressable>

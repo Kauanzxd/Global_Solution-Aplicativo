@@ -10,7 +10,13 @@ export default function CenariosProntos({ escolhido, aoEscolher }) {
       {CENARIOS.map((cenario) => {
         const ativo = cenario.id === escolhido;
         return (
-          <Pressable key={cenario.id} onPress={() => aoEscolher(cenario)} style={[styles.cartao, ativo && styles.ativo]}>
+          <Pressable
+            key={cenario.id}
+            onPress={() => aoEscolher(cenario)}
+            style={[styles.cartao, ativo && styles.ativo]}
+            accessibilityRole="button"
+            aria-selected={ativo}
+          >
             <Text style={[styles.titulo, ativo && styles.tituloAtivo]}>{cenario.titulo}</Text>
             <Text style={styles.descricao} numberOfLines={5}>
               {cenario.descricao}

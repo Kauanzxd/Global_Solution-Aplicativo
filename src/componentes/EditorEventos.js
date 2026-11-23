@@ -77,17 +77,22 @@ export default function EditorEventos({ eventos, distanciaIda, distanciaVolta = 
         // Grade com todos os tipos: toque em um para adicioná-lo
         <View style={styles.grade}>
           {TIPOS_EVENTO.map((tipo) => (
-            <Pressable key={tipo.tipo} style={styles.tipo} onPress={() => adicionar(tipo)}>
+            <Pressable key={tipo.tipo} style={styles.tipo} onPress={() => adicionar(tipo)} accessibilityRole="button">
               <View style={[styles.bolinha, { backgroundColor: tipo.cor }]} />
               <Text style={styles.textoTipo}>{tipo.rotulo}</Text>
             </Pressable>
           ))}
-          <Pressable style={styles.cancelar} onPress={() => setEscolhendo(false)}>
+          <Pressable style={styles.cancelar} onPress={() => setEscolhendo(false)} accessibilityRole="button">
             <Text style={styles.textoCancelar}>Cancelar</Text>
           </Pressable>
         </View>
       ) : (
-        <Pressable style={styles.adicionar} onPress={() => setEscolhendo(true)}>
+        <Pressable
+          style={styles.adicionar}
+          onPress={() => setEscolhendo(true)}
+          accessibilityRole="button"
+          aria-expanded={false}
+        >
           <Text style={styles.textoAdicionar}>+ Adicionar evento</Text>
         </Pressable>
       )}

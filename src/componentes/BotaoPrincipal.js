@@ -9,7 +9,7 @@ export default function BotaoPrincipal({ texto, aoTocar, desligado = false }) {
       onPress={aoTocar}
       disabled={desligado}
       accessibilityRole="button"
-      accessibilityState={{ disabled: desligado }}
+      aria-disabled={desligado}
     >
       <Text style={styles.texto}>{texto}</Text>
     </Pressable>

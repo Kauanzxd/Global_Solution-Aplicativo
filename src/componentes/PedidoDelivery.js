@@ -73,11 +73,11 @@ export default function PedidoDelivery({ aoPedir }) {
               </Text>
             </View>
             <View style={styles.quantidade}>
-              <Pressable style={styles.botaoQtd} onPress={() => mudarQuantidade(item, -1)} accessibilityLabel={`Tirar um ${item.nome}`}>
+              <Pressable style={styles.botaoQtd} onPress={() => mudarQuantidade(item, -1)} accessibilityRole="button" accessibilityLabel={`Tirar um ${item.nome}`}>
                 <Text style={styles.textoQtd}>−</Text>
               </Pressable>
               <Text style={styles.numeroQtd}>{sacola[item.id] || 0}</Text>
-              <Pressable style={styles.botaoQtd} onPress={() => mudarQuantidade(item, 1)} accessibilityLabel={`Pôr mais um ${item.nome}`}>
+              <Pressable style={styles.botaoQtd} onPress={() => mudarQuantidade(item, 1)} accessibilityRole="button" accessibilityLabel={`Pôr mais um ${item.nome}`}>
                 <Text style={styles.textoQtd}>+</Text>
               </Pressable>
             </View>

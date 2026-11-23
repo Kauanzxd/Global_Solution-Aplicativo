@@ -531,6 +531,8 @@ export default function Mapa({
         onPress={tocar}
         disabled={!aoTocar}
         onLayout={(evento) => setLarguraTela(evento.nativeEvent.layout.width || 380)}
+        accessibilityRole={aoTocar ? 'button' : undefined}
+        accessibilityLabel={aoTocar ? 'Mapa: toque para escolher o destino' : 'Mapa da simulação'}
       >
         <Svg width="100%" height="100%" viewBox={`${x0} ${y0} ${vista} ${vista}`}>
           {/* 0. Mapa de ruas de verdade (no lugar das camadas 1 a 4, 6, 7 e 8) */}

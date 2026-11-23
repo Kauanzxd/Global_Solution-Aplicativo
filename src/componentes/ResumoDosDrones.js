@@ -11,7 +11,7 @@ export default function ResumoDosDrones({ visivel, aoFechar, resumos }) {
     <Modal visible={visivel} transparent animationType="slide" onRequestClose={aoFechar}>
       <View style={styles.fundo}>
         {/* Tocar fora da aba (na parte escura) também fecha */}
-        <Pressable style={styles.areaFora} onPress={aoFechar} accessibilityLabel="Fechar o resumo dos drones" />
+        <Pressable style={styles.areaFora} onPress={aoFechar} accessibilityRole="button" accessibilityLabel="Fechar o resumo dos drones" />
         <View style={styles.aba} accessibilityViewIsModal>
           <View style={styles.topo}>
             <Text style={styles.titulo} accessibilityRole="header">

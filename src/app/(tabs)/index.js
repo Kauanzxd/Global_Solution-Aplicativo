@@ -732,7 +732,12 @@ export default function Simular() {
 
       {/* Legenda do mapa: aparece e some com um toque (na montagem e durante o voo) */}
       <View style={styles.linhaMapa}>
-        <Pressable style={[styles.chip, mostrarLegenda && styles.chipLigado]} onPress={() => setMostrarLegenda(!mostrarLegenda)}>
+        <Pressable
+          style={[styles.chip, mostrarLegenda && styles.chipLigado]}
+          onPress={() => setMostrarLegenda(!mostrarLegenda)}
+          accessibilityRole="button"
+          aria-expanded={mostrarLegenda}
+        >
           <Text style={[styles.textoChip, mostrarLegenda && styles.textoChipLigado]}>
             {mostrarLegenda ? 'Esconder legenda' : 'Legenda do mapa'}
           </Text>
@@ -741,7 +746,7 @@ export default function Simular() {
           style={[styles.chip, voz.ligada && styles.chipLigado]}
           onPress={voz.alternar}
           accessibilityRole="switch"
-          accessibilityState={{ checked: voz.ligada }}
+          aria-checked={voz.ligada}
         >
           <Text style={[styles.textoChip, voz.ligada && styles.textoChipLigado]}>
             {voz.ligada ? 'Voz do rádio: ligada' : 'Voz do rádio: desligada'}
@@ -773,13 +778,15 @@ export default function Simular() {
           </View>
           <View style={styles.linhaMapa}>
             {foco !== null ? (
-              <Pressable style={styles.chip} onPress={() => setFoco(null)}>
+              <Pressable style={styles.chip} onPress={() => setFoco(null)} accessibilityRole="button">
                 <Text style={styles.textoChip}>Ver a cidade inteira</Text>
               </Pressable>
             ) : null}
             <Pressable
               style={[styles.chip, mostrarAlcance && styles.chipLigado]}
               onPress={() => setMostrarAlcance(!mostrarAlcance)}
+              accessibilityRole="switch"
+              aria-checked={mostrarAlcance}
             >
               <Text style={[styles.textoChip, mostrarAlcance && styles.textoChipLigado]}>Alcance das filiais</Text>
             </Pressable>
@@ -885,6 +892,8 @@ export default function Simular() {
             style={[styles.botao, !podeIniciar && styles.botaoDesligado]}
             onPress={iniciar}
             disabled={!podeIniciar}
+            accessibilityRole="button"
+            aria-disabled={!podeIniciar}
           >
             <Text style={styles.textoBotao}>Iniciar simulação</Text>
           </Pressable>
@@ -914,7 +923,7 @@ export default function Simular() {
               {outro.idDrone} ({NOME_MISSAO[outro.prioridade] || outro.prioridade}): {outro.espera > 0 ? 'aguardando a vez na filial' : outro.mensagem}
             </Text>
           ))}
-          <Pressable style={[styles.botao, styles.botaoSecundario]} onPress={reiniciar}>
+          <Pressable style={[styles.botao, styles.botaoSecundario]} onPress={reiniciar} accessibilityRole="button">
             <Text style={[styles.textoBotao, styles.textoSecundario]}>{emVoo ? 'Interromper e reiniciar' : 'Nova simulação'}</Text>
           </Pressable>
         </View>
