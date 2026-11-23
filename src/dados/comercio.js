@@ -22,7 +22,7 @@ export const LOJAS = [
     capa: require('../../assets/images/lojas/cover-burger.jpg'),
     ...grausParaKm(-23.5665, -46.6915),
     itens: [
-      { id: 'double-cheese', nome: 'Double Cheese', desc: 'Dois smash, cheddar e cebola caramelizada.', centavos: 3990, pesoKg: 0.42, img: require('../../assets/images/lojas/burger-double-cheese.jpg') },
+      { id: 'double-cheese', nome: 'Double Cheese', desc: 'Dois smash, cheddar e cebola caramelizada.', centavos: 3990, pesoKg: 0.42, img: require('../../assets/images/lojas/bh-double-cheese.jpg') },
       { id: 'fritas', nome: 'Batata frita', desc: 'Porção média, sal e páprica.', centavos: 1690, pesoKg: 0.2, img: require('../../assets/images/lojas/bh-fritas.jpg') },
       { id: 'onion', nome: 'Onion rings', desc: 'Anéis de cebola com molho da casa.', centavos: 1990, pesoKg: 0.22, img: require('../../assets/images/lojas/bh-onion.jpg') },
       { id: 'frango', nome: 'Frango crocante', desc: '8 tiras empanadas.', centavos: 2490, pesoKg: 0.3, img: require('../../assets/images/lojas/bh-frango.jpg') },
