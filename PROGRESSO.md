@@ -10,9 +10,10 @@ Diário do projeto. Lido no início de toda sessão e atualizado ao final.
   linhas). Nada de muito código de uma vez.
 - Explicações em português, passo a passo, linha a linha, como uma aula.
 - O Claude roda os comandos e eu acompanho pelo VS Code.
-- Commits e pushes são feitos só por mim, sem linha de coautoria de IA.
-  Ao fim de cada passo, o Claude diz quais arquivos entram no commit e
-  espera eu responder "Commit feito, siga".
+- Desde 22/11/2026 o Claude faz os commits do app (no meu estilo:
+  `feat:`/`fix:` com gerúndio, sem linha de coautoria de IA). O push
+  continua sendo meu.
+- O app não leva menção a IA (README, telas e documentação).
 
 ## O projeto
 
@@ -53,8 +54,11 @@ Regras do drone (todas já implementadas, exceto onde indicado):
   rádio = regra do ar (cada um pela própria direita).
 - Drone sem rádio "errante": contorna pelo lado (lado travado) e só recua
   dentro da bolha de 150 m.
-- Missão completa: ida, entrega no destino, volta à filial mais próxima (ou
-  zona, se a bateria não cobrir a filial com margem).
+- Missão completa: ida, entrega no destino e volta à filial de ORIGEM; a
+  filial mais próxima (ou uma zona) só em falha ou se a bateria não der.
+- Vários drones: bolha também na altura (sem desvio se um está descendo),
+  acordo único pelo rádio (os dois confirmam) e quem segue reto só reage
+  dentro de meia bolha.
 - (Ainda não implementado) Níveis 1 e 2 podem pegar um drone comercial que
   ainda não decolou.
 
@@ -70,7 +74,13 @@ Parte secundária: aba de Pedidos.
 - Expo SDK 58, React Native 0.88
 - JavaScript (sem TypeScript)
 - Expo Router (rotas em `src/app/`)
-- react-native-svg
+- react-native-svg; mapa de ruas com tiles do OpenStreetMap
+- Voz: Azure Speech pela rota `src/app/api/voz+api.js` (chave só no
+  servidor, variáveis `AZURE_SPEECH_KEY` e `AZURE_SPEECH_REGION`);
+  expo-speech como reserva
+- Endereços: Nominatim pela rota `src/app/api/endereco+api.js`
+- Publicação: EAS Hosting (`web.output: "server"`) em https://sadec.expo.app
+- Lint: ESLint com `eslint-config-expo` (`npm run lint`)
 - Instalar pacotes sempre com `npx expo install <pacote>`
 
 ## O que já está pronto
@@ -120,6 +130,27 @@ Parte secundária: aba de Pedidos.
 - Nos arquivos de `src/regras/`, os imports usam `.js` no final, para
   dar para testar com Node:
   `node --no-warnings --input-type=module -e "import ..."`
+- Missão de órgãos (hospital X → hospital Y → filial) e resumo do voo
+  (`ResumoVoo.js`); com vários drones, aba que sobe com o resumo de todos
+  (`ResumoDosDrones.js`).
+- `src/regras/rede.js`: vários drones no ar se enxergando (espelho do outro
+  drone), acordo pelo rádio, escala do tráfego e eventos em qualquer drone
+  (simultâneos).
+- Operação da enchente no Jardim Pantanal (`src/dados/operacoes.js`): 6 drones,
+  2 por filial, ordem e tempo de saída calculados simulando a tela.
+- Rádio da rede (`LogDoRadio.js`, 5 mensagens) com voz de aviação
+  (`useVozDoRadio.js`, `somDeRadio.js`): uma voz por drone, fila em que os
+  eventos furam a vez, texto sincronizado com a fala e câmera lenta só no
+  drone que está falando.
+- Mapa de ruas real (`CamadaRuas.js`), legenda, safe area, velocidade 0,25×
+  a 2×, pinça e arrastar (`useGestosDoMapa.js`) e botão "Visão automática".
+- Busca por endereço (rua, avenida e número) em `BuscaDestino.js` +
+  `src/servicos/enderecos.js`, no simulador e nos pedidos.
+- Aba Pedidos: login por perfil (`contas.js`), delivery, remédio, órgão,
+  socorro, pedidos prontos, fila da Central e avaliação; o pedido vira o voo.
+- Revisão minuciosa (23/11): lint configurado e sem avisos, foto do Double
+  Cheese otimizada, `aria-*` em todos os botões, README de portfólio com QR
+  code e prints (`docs/imagens/`), LICENSE MIT no meu nome.
 
 ### Formato dos eventos (o que a tela do passo 4 vai produzir)
 - `{ tipo: 'pane' | 'falha-grave' | 'motor', km }` (km 0 = na decolagem;
@@ -133,27 +164,16 @@ Parte secundária: aba de Pedidos.
 - O km é o do hodômetro (viagem inteira): a ida até a Aldeia tem 4,2 km;
   km maiores acontecem na volta.
 
-## Próximos passos (nesta ordem)
+## Próximos passos
 
-**Única pendência do projeto: terminar o aplicativo até 23/11/2026.**
-As outras entregas da Global Solution já foram feitas e estão certas.
-Passos 1 a 5a (voo, eventos, tela de montagem, cenários) e o mapa real
-estão PRONTOS. As apresentações são de 23 a 27/11.
+**O app está pronto e publicado para as apresentações (23 a 27/11).**
+Tudo está commitado e enviado ao GitHub (repositório público).
 
-1. **Missão de órgãos**: hospital X (coleta) → hospital Y (entrega) →
-   filial, com escolha de dois hospitais quando a prioridade for órgãos e
-   bateria para as 3 pernas (é o que o Documento Funcional e o Java dizem).
-2. **Publicar** (EAS Update com QR code; rodar `npx expo install --check`
-   antes, o Expo avisou sobre 58.0.23 → ~58.0.26). Testar cedo.
-3. Resumo do voo no fim (distância, bateria, tempo, eventos, onde pousou).
-4. Várias rotas simultâneas (drones da rede se enxergando).
-5. Safe area e legenda do mapa.
-6. Aba Pedidos.
-7. README com prints e seção de uso de IA (o enunciado pede declarar).
-
-Pendências menores:
+Opcionais, se sobrar tempo:
 - Níveis 1 e 2 pegando um drone comercial que ainda não decolou.
-- Lint não configurado (`npx expo lint` instalaria pacotes).
+- Dividir os arquivos grandes: `src/app/(tabs)/index.js` (~1.200 linhas) e
+  `src/regras/voo.js` (~1.500 linhas).
+- Mensagens de commit: título com até ~72 caracteres e detalhes no corpo.
 
 ## Para testar
 
@@ -163,6 +183,16 @@ npx expo start --web --port 8081
 
 Abrir http://localhost:8081 (tamanho de celular). No celular, pelo
 Expo Go, na mesma rede Wi-Fi.
+
+Publicar (o selo de versão no fim da tela mostra o commit):
+
+```bash
+EXPO_PUBLIC_VERSAO=$(git rev-parse --short HEAD) npx expo export --platform web
+npx eas-cli@latest deploy --prod --environment production
+```
+
+Depois, conferir com curl que https://sadec.expo.app serve o `index-*.js`
+novo (às vezes precisa de um segundo deploy) e gerar o QR com `?v=<commit>`.
 
 ## Histórico de sessões
 
@@ -261,3 +291,36 @@ Expo Go, na mesma rede Wi-Fi.
 - **Onde paramos:** todas as entregas da GS feitas e certas. A única
   pendência é terminar o app até 23/11: próximo é a missão de órgãos e
   publicar com QR code.
+
+### 22/11/2026 — Órgãos, vários drones, Pedidos e publicação
+- **Feito:** missão de órgãos (regras e tela); resumo do voo; várias rotas
+  simultâneas com acordo pelo rádio; legenda e safe area; aba Pedidos com
+  login por perfil, pedidos por tipo, pedidos prontos e a operação da
+  enchente (6 drones de 3 filiais); app ligado ao EAS e publicado em
+  sadec.expo.app; rádio da rede, velocidade, mapa de ruas do OpenStreetMap,
+  bolha de altura, câmera lenta nos eventos e voz no rádio (expo-speech, depois
+  Azure com filtro de rádio). A partir daqui, o Claude passou a fazer os
+  commits.
+- **Conceitos:** Context do React (pedidos compartilhados entre as abas);
+  rotas de API no servidor (`+api.js`) para esconder a chave; SSML; Web Audio
+  (filtros passa-alta e passa-baixa); variáveis de ambiente no EAS; tiles e
+  projeção de Mercator.
+- **Onde paramos:** app publicado; faltava sincronizar a voz com a tela.
+
+### 22–23/11/2026 — Sincronia da voz, tráfego aéreo, endereços e revisão final
+- **Feito:** texto do rádio sai junto da fala; eventos furam a fila da voz;
+  câmera lenta só no drone que fala (e nos dois durante o acordo); pinça e
+  arrastar no mapa; acordo único entre drones com espelho do drone real; fila
+  do pouso (sem desvio de quem está descendo); volta para a filial de origem;
+  enchente recalculada (2 por filial, saída em ordem, dois cruzamentos
+  visíveis); desvio de pássaros por trás com lado travado; nome sempre em cima
+  do drone; voz que volta ao religar o rádio no iPhone; busca por endereço
+  (Nominatim); resumo de todos os drones; eventos em qualquer drone, ao mesmo
+  tempo. Revisão minuciosa: lint, imagem, acessibilidade (`aria-*`), README de
+  portfólio com QR code e prints, LICENSE MIT no meu nome.
+- **Conceitos:** fila com prioridade; sincronizar animação com áudio; pointer
+  events (pinça e arrasto); simular a tela no Node para calcular a disposição
+  dos drones; regras dos hooks do React no lint (refs em `useLayoutEffect`);
+  `aria-*` na web; licenças de software (MIT × sem licença).
+- **Onde paramos:** app pronto, publicado (c333919) e no GitHub. Próximo:
+  as apresentações de 23 a 27/11.
