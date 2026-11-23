@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BuscaDestino from '../../componentes/BuscaDestino';
@@ -274,29 +274,25 @@ export default function Simular() {
   const emVoo = voo !== null && estaNoAr(voo);
 
   // Momentos marcantes do voo, para o resumo do fim: cada mensagem nova, com o km do
-  // hodômetro. Mensagens que só mudam os números ("Drone a 225 m" → "Drone a 213 m")
-  // contam como a mesma, para o resumo não repetir a aproximação metro a metro.
+  // hodômetro (gravados pelo relógio, junto com o rádio). Mensagens que só mudam os números
+  // ("Drone a 225 m" → "Drone a 213 m") contam como a mesma, para o resumo não repetir a
+  // aproximação metro a metro.
   const [etapasDoVoo, setEtapasDoVoo] = useState([]);
-  useEffect(() => {
-    if (voo === null || !voo.mensagem) return;
-    setEtapasDoVoo((atuais) => {
-      const ultima = atuais[atuais.length - 1];
-      if (ultima && semNumeros(ultima.mensagem) === semNumeros(voo.mensagem)) return atuais;
-      return [...atuais, { km: voo.hodometro || 0, mensagem: voo.mensagem }];
-    });
-  }, [voo?.mensagem]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Outros drones da rede voando ao mesmo tempo (cada um é um voo de verdade)
   const [outros, setOutros] = useState([]);
   // Os momentos marcantes de cada um dos outros drones (para o resumo de todos):
   // nome de rádio → [{ km, mensagem }]
   const etapasDosOutros = useRef({});
-  const [mostrarResumos, setMostrarResumos] = useState(false);
+  // A aba com o resumo de todos (null = fechada; aberta = a cópia das etapas no momento do toque)
+  const [resumosAbertos, setResumosAbertos] = useState(null);
 
   // Velocidade da simulação (o relógio lê pela referência, para mudar no meio do voo)
   const [velocidade, setVelocidade] = useState(VELOCIDADE_PADRAO);
   const velocidadeRef = useRef(velocidade);
-  velocidadeRef.current = velocidade;
+  useLayoutEffect(() => {
+    velocidadeRef.current = velocidade;
+  }, [velocidade]);
 
   // Rádio: as mensagens de todos os drones, para o painel por cima do mapa
   const [radio, setRadio] = useState([]);
@@ -313,6 +309,7 @@ export default function Simular() {
   const rolagem = useRef(null);
   const topoDoMapa = useRef(0); // onde o mapa começa dentro da tela (medido pelo onLayout)
   const subirAoMapa = useRef(false); // pedido de subir a tela, feito no botão de iniciar
+  const margens = useSafeAreaInsets(); // espaço da barra de status (e do entalhe) do celular
 
   // Pedidos feitos na aba Pedidos: um deles pode chegar aqui para virar o voo
   const { pedidoParaVoar, setPedidoParaVoar, atualizarStatus } = usePedidos();
@@ -332,7 +329,7 @@ export default function Simular() {
     const abertura = operacao
       ? `${operacao.titulo}. ${operacao.drones.length} drones acionados.`
       : 'Simulação iniciada';
-    voz.falar([{ id: `central-${Date.now()}`, nome: 'Central SADEC', cor: TEMA.marca, texto: abertura, evento: false }]);
+    voz.falar([{ id: 'central-abertura', nome: 'Central SADEC', cor: TEMA.marca, texto: abertura, evento: false }]);
     // A tela sobe até o mapa logo depois que o painel do voo aparecer (veja o useEffect abaixo)
     subirAoMapa.current = true;
     setOutros(extrasPlanejados.map(criarVooDaRede));
@@ -370,7 +367,6 @@ export default function Simular() {
   const [mostrarLegenda, setMostrarLegenda] = useState(false);
 
   // Áreas da tela ocupadas pelo sistema (entalhe, barra de status): o conteúdo começa abaixo delas
-  const margens = useSafeAreaInsets();
 
   // Muda só um campo da configuração, mantendo os outros (o "..." copia o resto).
   // Mexeu em algo? Deixa de ser exatamente o cenário pronto.
@@ -404,6 +400,7 @@ export default function Simular() {
 
   // Chegou um pedido da aba Pedidos: ele vira a configuração da simulação (coleta, entrega,
   // tipo e a bateria sugerida). Daí dá para iniciar o voo, ou ainda pôr eventos e outros drones.
+  // (Mudar o estado aqui é de propósito: o pedido chega de fora desta tela, pelo contexto.)
   useEffect(() => {
     if (!pedidoParaVoar) return;
     const nova = {
@@ -416,6 +413,7 @@ export default function Simular() {
       pedido: pedidoParaVoar,
       operacao: pedidoParaVoar.operacao || null,
     };
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setConfiguracao(nova);
     setCenario(null);
     voz.parar();
@@ -544,8 +542,10 @@ export default function Simular() {
   // uma cópia velha do voo e dos outros drones se lesse direto das variáveis)
   const vooRef = useRef(voo);
   const outrosRef = useRef(outros);
-  vooRef.current = voo;
-  outrosRef.current = outros;
+  useLayoutEffect(() => {
+    vooRef.current = voo;
+    outrosRef.current = outros;
+  }, [voo, outros]);
 
   // Algum drone ainda voando? (o principal ou um dos outros da rede)
   const algumNoAr = emVoo || outros.some((outro) => estaNoAr(outro));
@@ -588,11 +588,10 @@ export default function Simular() {
         const chave = semNumeros(drone.mensagem);
         if (!drone.mensagem || ultimaDoDrone.current[nome] === chave) return;
         ultimaDoDrone.current[nome] = chave;
-        // Guarda o momento para o resumo deste drone (o principal tem o resumo próprio)
-        if (indice > 0) {
-          const lista = etapasDosOutros.current[nome] || (etapasDosOutros.current[nome] = []);
-          lista.push({ km: drone.hodometro || 0, mensagem: drone.mensagem });
-        }
+        // Guarda o momento para o resumo deste drone
+        const etapa = { km: drone.hodometro || 0, mensagem: drone.mensagem };
+        if (indice === 0) setEtapasDoVoo((atuais) => [...atuais, etapa]);
+        else (etapasDosOutros.current[nome] || (etapasDosOutros.current[nome] = [])).push(etapa);
         const cor = indice === 0 ? '#0B1F33' : (extrasPlanejados[indice - 1] && extrasPlanejados[indice - 1].cor) || TEMA.marca;
         // Numa emergência com relato (zonas checadas e decisão), o rádio conta linha por linha
         const relato = drone.relato && drone.relato.para === drone.mensagem ? drone.relato.linhas : null;
@@ -633,8 +632,10 @@ export default function Simular() {
   else vistaAlvo = foco ? foco.km * UNIDADES_POR_KM : VISTA_CIDADE;
 
   // Zoom suave: a cada atualização, a vista anda 30% do caminho até o alvo
+  // (mudar o estado aqui é de propósito: é a animação do zoom, um passo por atualização)
   const [vista, setVista] = useState(vistaAlvo);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setVista((atual) => {
       const proxima = atual + (vistaAlvo - atual) * 0.3;
       return Math.abs(vistaAlvo - proxima) < 0.2 ? vistaAlvo : proxima; // pertinho: encaixa no alvo
@@ -929,14 +930,18 @@ export default function Simular() {
 
       {/* Com vários drones: quando todos pousam, o resumo de cada um numa aba que sobe */}
       {voo !== null && !algumNoAr && outros.length > 0 ? (
-        <Pressable style={[styles.botao, styles.botaoSecundario]} onPress={() => setMostrarResumos(true)} accessibilityRole="button">
+        <Pressable
+          style={[styles.botao, styles.botaoSecundario]}
+          onPress={() => setResumosAbertos({ ...etapasDosOutros.current })}
+          accessibilityRole="button"
+        >
           <Text style={[styles.textoBotao, styles.textoSecundario]}>Ver o resumo de todos os drones ({outros.length + 1})</Text>
         </Pressable>
       ) : null}
       {voo !== null ? (
         <ResumoDosDrones
-          visivel={mostrarResumos}
-          aoFechar={() => setMostrarResumos(false)}
+          visivel={resumosAbertos !== null}
+          aoFechar={() => setResumosAbertos(null)}
           resumos={[
             { nome: voo.idDrone || 'SADEC-01', cor: '#0B1F33', voo, bateriaInicial: configuracao.bateria, etapas: etapasDoVoo },
             ...outros.map((outro, indice) => ({
@@ -944,7 +949,7 @@ export default function Simular() {
               cor: (extrasPlanejados[indice] && extrasPlanejados[indice].cor) || TEMA.marca,
               voo: outro,
               bateriaInicial: (extrasPlanejados[indice] && extrasPlanejados[indice].bateria) || outro.bateria,
-              etapas: etapasDosOutros.current[outro.idDrone] || [],
+              etapas: (resumosAbertos && resumosAbertos[outro.idDrone]) || [],
             })),
           ]}
         />

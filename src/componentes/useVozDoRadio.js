@@ -1,5 +1,5 @@
 import * as Speech from 'expo-speech';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { chiadoDeAbertura, decodificarAudio, destravarAudio, tocarComoRadio } from './somDeRadio';
 import { TEMA } from './tema';
@@ -139,11 +139,13 @@ function duracaoEstimadaMs(texto) {
 // nela (assim o texto e a voz andam juntos, na mesma ordem)
 export default function useVozDoRadio({ aoMostrar }) {
   const aoMostrarRef = useRef(aoMostrar);
-  aoMostrarRef.current = aoMostrar;
-
   const [ligada, setLigada] = useState(true);
   const ligadaRef = useRef(ligada);
-  ligadaRef.current = ligada;
+  // As referências guardam o valor mais recente para as falas (que terminam depois)
+  useLayoutEffect(() => {
+    aoMostrarRef.current = aoMostrar;
+    ligadaRef.current = ligada;
+  });
 
   const fila = useRef([]); // [{ mensagem, nome, falado (null = só texto), audio, evento, parte }]
   const atual = useRef(null); // a fala que está tocando agora
@@ -205,6 +207,8 @@ export default function useVozDoRadio({ aoMostrar }) {
     // A mensagem aparece no rádio escrito agora, junto com o começo da fala
     aoMostrarRef.current(atual.current.mensagem);
     // Rotina que esperou demais já ficou velha: fica só no texto
+    // (Date.now aqui não roda no render: a fila anda no fim de cada fala e nos toques)
+    // eslint-disable-next-line react-hooks/purity
     const velha = !atual.current.evento && Date.now() - atual.current.criadoEm > VALIDADE_ROTINA_MS;
     const falado = velha ? null : atual.current.falado;
     if (!falado) {
@@ -229,6 +233,7 @@ export default function useVozDoRadio({ aoMostrar }) {
       return;
     }
     // 2. Reserva: a voz do aparelho
+    // eslint-disable-next-line react-hooks/purity
     if (atual.current.audio) nuvemPausadaAte.current = Date.now() + PAUSA_APOS_FALHA_MS; // demorou demais
     Speech.speak(falado, { ...jeitoDeFalar(atual.current.nome), onDone: terminou, onError: terminou });
     seguranca.current = setTimeout(terminou, duracaoEstimadaMs(falado));
@@ -316,8 +321,8 @@ export default function useVozDoRadio({ aoMostrar }) {
     if (ligada) return;
     fila.current.forEach((item) => aoMostrarRef.current(item.mensagem));
     parar();
-  }, [ligada]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => parar, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ligada]);
+  useEffect(() => parar, []);
 
   return { ligada, alternar, falar, parar, eventoNaVoz };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 // Gestos do usuário no mapa, por cima da câmera automática da simulação:
@@ -9,8 +9,9 @@ import { Platform } from 'react-native';
 //   - "deslocamento": { x, y } em unidades do desenho, quanto a visão foi arrastada;
 //   - "acabouDeArrastar()": true logo depois de um arrasto (para o toque não escolher destino);
 //   - "voltarAoAutomatico()": zera o zoom e o arrasto.
-// "elemento": a referência da caixa do mapa. "unidadesPorPx": referência com quantas
-// unidades do desenho cabem em 1 px agora (muda com o zoom).
+//   - "caixa": a referência para colocar na caixa do mapa (ref={caixa}).
+// "unidadesPorPx": referência com quantas unidades do desenho cabem em 1 px agora (muda
+// com o zoom).
 // Só na versão web (a da apresentação); no app nativo, a visão fica sempre automática.
 // Usa "pointer events", que juntam dedo, mouse e caneta num tipo só de evento.
 
@@ -25,15 +26,18 @@ const limitarDeslocamento = (valor) => Math.min(DESLOCAMENTO_MAXIMO, Math.max(-D
 const distancia = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const pontoMedio = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
-export default function useGestosDoMapa(elemento, unidadesPorPx) {
+export default function useGestosDoMapa(unidadesPorPx) {
+  const caixa = useRef(null);
   const [fator, setFator] = useState(1);
   const [deslocamento, setDeslocamento] = useState({ x: 0, y: 0 });
   const fatorRef = useRef(fator); // os eventos leem daqui (não veem o estado novo)
-  fatorRef.current = fator;
+  useLayoutEffect(() => {
+    fatorRef.current = fator;
+  }, [fator]);
   const fimDoArrasto = useRef(0); // quando o último arrasto terminou (Date.now)
 
   useEffect(() => {
-    const no = elemento.current;
+    const no = caixa.current;
     if (Platform.OS !== 'web' || !no || !no.addEventListener) return undefined;
 
     // O navegador não rola a página nem dá zoom nela com o dedo em cima do mapa: os gestos
@@ -121,7 +125,7 @@ export default function useGestosDoMapa(elemento, unidadesPorPx) {
       no.removeEventListener('gesturestart', bloquearGestoDoSafari);
       no.removeEventListener('gesturechange', bloquearGestoDoSafari);
     };
-  }, [elemento, unidadesPorPx]);
+  }, [unidadesPorPx]);
 
   const acabouDeArrastar = () => Date.now() - fimDoArrasto.current < 400;
   const voltarAoAutomatico = () => {
@@ -130,5 +134,5 @@ export default function useGestosDoMapa(elemento, unidadesPorPx) {
   };
   const automatico = fator === 1 && deslocamento.x === 0 && deslocamento.y === 0;
 
-  return { fator, deslocamento, automatico, acabouDeArrastar, voltarAoAutomatico };
+  return { caixa, fator, deslocamento, automatico, acabouDeArrastar, voltarAoAutomatico };
 }

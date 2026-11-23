@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text as Texto, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Polygon, Polyline, Rect, Text } from 'react-native-svg';
 import { AREAS, CONTORNO, FILIAIS, LOCAIS, PICO, RIOS, TAMANHO_KM, VIAS, ZONAS_POUSO } from '../dados/regiao';
@@ -441,17 +441,18 @@ export default function Mapa({
   vista: vistaAutomatica = 100,
   aoTocar,
 }) {
-  // Referência para a caixa do mapa: serve para medir onde ela está na tela na hora do toque
-  const caixa = useRef(null);
   // Largura do mapa na tela (px): define o zoom dos tiles do mapa de ruas
   const [larguraTela, setLarguraTela] = useState(380);
   // Gestos do usuário (arrastar, pinça, roda do mouse) por cima da câmera automática.
   // "unidadesPorPx" converte o arrasto do dedo (px) em unidades do desenho.
+  // "caixa": a referência da caixa do mapa (dos gestos e para medir o toque na tela)
   const unidadesPorPx = useRef(1);
-  const gestos = useGestosDoMapa(caixa, unidadesPorPx);
+  const { caixa, fator, deslocamento, automatico, acabouDeArrastar, voltarAoAutomatico } = useGestosDoMapa(unidadesPorPx);
   // A vista nunca passa do mapa inteiro (100) nem fica menor que 1,5 km (2 unidades)
-  const vista = Math.min(100, Math.max(2, vistaAutomatica * gestos.fator));
-  unidadesPorPx.current = vista / larguraTela;
+  const vista = Math.min(100, Math.max(2, vistaAutomatica * fator));
+  useLayoutEffect(() => {
+    unidadesPorPx.current = vista / larguraTela;
+  }, [vista, larguraTela]);
   const partida = origem || FILIAIS[0];
   const posicaoDrone = drone || partida;
   const matas = AREAS.filter((area) => area.tipo === 'mata');
@@ -462,8 +463,8 @@ export default function Mapa({
   const meio = centro || posicaoDrone;
   const limitar = (valor) => Math.min(Math.max(valor, 0), 100 - vista);
   // (o arrasto do dedo desloca a visão para o lado contrário do dedo)
-  const x0 = limitar(meio.x * ESCALA - vista / 2 - gestos.deslocamento.x);
-  const y0 = limitar(meio.y * ESCALA - vista / 2 - gestos.deslocamento.y);
+  const x0 = limitar(meio.x * ESCALA - vista / 2 - deslocamento.x);
+  const y0 = limitar(meio.y * ESCALA - vista / 2 - deslocamento.y);
   const detalhe = vista / ESCALA <= VISTA_DETALHE_KM; // a vista mostra 22 km ou menos
 
   // Só desenha os locais que aparecem na vista (com uma folguinha na borda): com 200 locais,
@@ -502,7 +503,7 @@ export default function Mapa({
   //    sobra a posição do toque DENTRO do mapa, em pixels.
   // 3. Pixels ÷ largura = fração do mapa (0 a 1); × vista + x0 = unidade do desenho; ÷ ESCALA = km.
   const tocar = (evento) => {
-    if (!aoTocar || !caixa.current || gestos.acabouDeArrastar()) return; // arrastar não é tocar
+    if (!aoTocar || !caixa.current || acabouDeArrastar()) return; // arrastar não é tocar
     const { pageX, pageY } = evento.nativeEvent;
     caixa.current.measureInWindow((esquerda, topo, largura) => {
       const ponto = {
@@ -780,8 +781,8 @@ export default function Mapa({
         </Svg>
       </Pressable>
       {/* Depois de arrastar ou dar zoom: volta para a câmera da simulação */}
-      {!gestos.automatico ? (
-        <Pressable style={styles.botaoZoom} onPress={gestos.voltarAoAutomatico} accessibilityRole="button">
+      {!automatico ? (
+        <Pressable style={styles.botaoZoom} onPress={voltarAoAutomatico} accessibilityRole="button">
           <Texto style={styles.textoBotaoZoom}>Visão automática</Texto>
         </Pressable>
       ) : null}

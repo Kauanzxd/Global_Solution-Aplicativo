@@ -102,7 +102,7 @@ export default function Pedidos() {
 
           {confirmacao ? (
             <Text style={styles.confirmacao} accessibilityRole="alert">
-              Pedido {confirmacao.codigo} registrado na fila da Central. Veja abaixo e toque em "Ver o voo no simulador" para
+              Pedido {confirmacao.codigo} registrado na fila da Central. Veja abaixo e toque em “Ver o voo no simulador” para
               acompanhar o drone.
             </Text>
           ) : null}
